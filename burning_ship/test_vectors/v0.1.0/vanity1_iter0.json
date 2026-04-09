@@ -1,0 +1,95 @@
+{
+  "version": "0.1.0",
+  "input": {
+    "entropy_hex": "951df7837eb13d5a019d1669a0280dbd",
+    "entropy_bits": 128,
+    "bip39_mnemonic": "never use this word because public all people have access address key",
+    "argon2_profile": "b",
+    "argon2_iterations": 0,
+    "gw_mode": "d"
+  },
+  "stage1": {
+    "params": {
+      "o": 0,
+      "p": 0,
+      "q": 0
+    },
+    "leaves": [
+      {
+        "re_min": "0x090CEA8BE71B5F40",
+        "re_max": "0x090CEA91A6718FB2",
+        "im_min": "0xF01A7C46B4794B18",
+        "im_max": "0xF01A7C4C313BCDDF",
+        "re_min_f64": 0.5656533684684388,
+        "re_max_f64": 0.5656533898792054,
+        "im_min_f64": -0.9935338247382053,
+        "im_max_f64": -0.9935338042962596,
+        "point": 1,
+        "path": "OrULdLruRulURdrurdrRdurrdrlUUludD"
+      },
+      {
+        "re_min": "0xF7BE85D6B9DD6A31",
+        "re_max": "0xF7BE87699843E175",
+        "im_min": "0xF03056D5E8511C9F",
+        "im_max": "0xF030579F8F2226F1",
+        "re_min_f64": -0.5159856426491038,
+        "re_max_f64": -0.5159841418460541,
+        "im_min_f64": -0.9881984371413005,
+        "im_max_f64": -0.98819768593045,
+        "point": 2,
+        "path": "OLdrDDRDlDurDlUldluRRDRUrUDlDruRu"
+      }
+    ]
+  },
+  "argon2": {
+    "input_hex": "951df7837eb13d5a",
+    "profile": "basic",
+    "iterations": 0,
+    "digests": [
+      {
+        "iteration": 0,
+        "hex": "951df7837eb13d5a000000000000000000000000000000000000000000000000"
+      }
+    ],
+    "final_digest": "951df7837eb13d5a000000000000000000000000000000000000000000000000"
+  },
+  "stage2": {
+    "params": {
+      "o": "0x57ABADC120CE1138",
+      "p": "0x4D3FD97A0BC97B27",
+      "q": "0xD180A4F194E24B79",
+      "o_re": 0.027864262694492936,
+      "o_im": 0.12862333527300507,
+      "p_re": 0.23675265768542886,
+      "p_im": 0.17119595926487818,
+      "q_re": -0.03877475543413311,
+      "q_im": -0.03494740105816163
+    },
+    "leaves": [
+      {
+        "re_min": "0xF3FF1DD6C7F4CF00",
+        "re_max": "0xF3FF1E28A680BC09",
+        "im_min": "0xF993D6B38414FF1B",
+        "im_max": "0xF993D6F857B7F375",
+        "re_min_f64": -0.7502156839479535,
+        "re_max_f64": -0.7502153789609602,
+        "im_min_f64": -0.40140657307227934,
+        "im_max_f64": -0.401406316672822,
+        "point": 1,
+        "path": "OLULULULdrULDRdlDULurlrRUlDDLdluR"
+      },
+      {
+        "re_min": "0x018E54CBDDFE1187",
+        "re_max": "0x018E556D5948DDEE",
+        "im_min": "0xF34331F8ECF52DF2",
+        "im_max": "0xF34332F6D1B222AF",
+        "re_min_f64": 0.09724883685692409,
+        "re_max_f64": 0.09724943842279953,
+        "im_min_f64": -0.7960949207633132,
+        "im_max_f64": -0.7960939749362902,
+        "point": 2,
+        "path": "OrURUlUlUUURURulLuluLDRURdlDDrdlr"
+      }
+    ]
+  }
+}

@@ -1,0 +1,75 @@
+{
+  "version": "0.1.0",
+  "input": {
+    "entropy_hex": "0000000000000000",
+    "entropy_bits": 64,
+    "bip39_mnemonic": "abandon abandon abandon abandon abandon able",
+    "argon2_profile": "b",
+    "argon2_iterations": 2,
+    "gw_mode": "m"
+  },
+  "stage1": {
+    "params": {
+      "o": 0,
+      "p": 0,
+      "q": 0
+    },
+    "leaves": [
+      {
+        "re_min": "0xF118DA7204BA2B20",
+        "re_max": "0xF118DA9EF3B85290",
+        "im_min": "0xFC87A02A5B2747D1",
+        "im_max": "0xFC87A084BB379C93",
+        "re_min_f64": -0.9314322992471393,
+        "re_max_f64": -0.9314321318565634,
+        "im_min_f64": -0.21688826994572533,
+        "im_max_f64": -0.2168879332716863,
+        "point": 1,
+        "path": "OLULULUULLULULULULULuLULULULulUUL"
+      }
+    ]
+  },
+  "argon2": {
+    "input_hex": "00000000",
+    "profile": "basic",
+    "iterations": 2,
+    "digests": [
+      {
+        "iteration": 1,
+        "hex": "99a070497fc7abcfea1f10ce9b3b5c882f23cce56e89b24135ee31d7bb62f9f0"
+      },
+      {
+        "iteration": 2,
+        "hex": "f467410b14fe72c21b89b42630119abe468f927fbc79c74c759d098580b819e9"
+      }
+    ],
+    "final_digest": "f467410b14fe72c21b89b42630119abe468f927fbc79c74c759d098580b819e9"
+  },
+  "stage2": {
+    "params": {
+      "o": "0x0A54BBEB07B694F9",
+      "p": "0xE09173D549485AA4",
+      "q": "0x7EFF344A00742FD9",
+      "o_re": 0.1554314773529768,
+      "o_im": 0.21080461610108614,
+      "p_re": 0.14323820598656312,
+      "p_im": -0.20889002847252414,
+      "q_re": 0.038074664771556854,
+      "q_im": 0.0200624447024893
+    },
+    "leaves": [
+      {
+        "re_min": "0xE3EDDA94AF342199",
+        "re_max": "0xE3EDDAB31CC676DE",
+        "im_min": "0x033DB5E598CC1C26",
+        "im_max": "0x033DB623436EC338",
+        "re_min_f64": -1.7544302169815107,
+        "re_max_f64": -1.754430103628325,
+        "im_min_f64": 0.2025660484912413,
+        "im_max_f64": 0.20256627821702083,
+        "point": 1,
+        "path": "OlUULULUlULULlUllULUlUULLUllUlUlL"
+      }
+    ]
+  }
+}

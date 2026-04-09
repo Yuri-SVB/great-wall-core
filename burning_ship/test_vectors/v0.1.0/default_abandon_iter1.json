@@ -1,0 +1,95 @@
+{
+  "version": "0.1.0",
+  "input": {
+    "entropy_hex": "00000000000000000000000000000000",
+    "entropy_bits": 128,
+    "bip39_mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+    "argon2_profile": "b",
+    "argon2_iterations": 1,
+    "gw_mode": "d"
+  },
+  "stage1": {
+    "params": {
+      "o": 0,
+      "p": 0,
+      "q": 0
+    },
+    "leaves": [
+      {
+        "re_min": "0xF118DA7204BA2B20",
+        "re_max": "0xF118DA9EF3B85290",
+        "im_min": "0xFC87A02A5B2747D1",
+        "im_max": "0xFC87A084BB379C93",
+        "re_min_f64": -0.9314322992471393,
+        "re_max_f64": -0.9314321318565634,
+        "im_min_f64": -0.21688826994572533,
+        "im_max_f64": -0.2168879332716863,
+        "point": 1,
+        "path": "OLULULUULLULULULULULuLULULULulUUL"
+      },
+      {
+        "re_min": "0xF118DA7204BA2B20",
+        "re_max": "0xF118DA9EF3B85290",
+        "im_min": "0xFC87A02A5B2747D1",
+        "im_max": "0xFC87A084BB379C93",
+        "re_min_f64": -0.9314322992471393,
+        "re_max_f64": -0.9314321318565634,
+        "im_min_f64": -0.21688826994572533,
+        "im_max_f64": -0.2168879332716863,
+        "point": 2,
+        "path": "OLULULUULLULULULULULuLULULULulUUL"
+      }
+    ]
+  },
+  "argon2": {
+    "input_hex": "0000000000000000",
+    "profile": "basic",
+    "iterations": 1,
+    "digests": [
+      {
+        "iteration": 1,
+        "hex": "68898364073e3692d19391fc0f589a1ef135515c2e3080b54adf3e1c4f8f34b9"
+      }
+    ],
+    "final_digest": "68898364073e3692d19391fc0f589a1ef135515c2e3080b54adf3e1c4f8f34b9"
+  },
+  "stage2": {
+    "params": {
+      "o": "0x2B17A55EDA545BB4",
+      "p": "0x81A746201C0261A6",
+      "q": "0x2EA3A73803064FD1",
+      "o_re": -0.044777547591365874,
+      "o_im": 0.11977351945824921,
+      "p_re": 0.17457246943376958,
+      "p_im": -0.12714175507426262,
+      "q_re": 0.03416669648140669,
+      "q_im": 0.007055064488667995
+    },
+    "leaves": [
+      {
+        "re_min": "0xE6449D137A93E2B4",
+        "re_max": "0xE6449DA17FB2E114",
+        "im_min": "0x01767955C0425891",
+        "im_max": "0x01767A0919D1651C",
+        "re_min_f64": -1.6082486380680685,
+        "re_max_f64": -1.6082481090023248,
+        "im_min_f64": 0.09142430778969958,
+        "im_max_f64": 0.09142497591991486,
+        "point": 1,
+        "path": "OlUULLULuLLuLuLulULLULULULULLULUl"
+      },
+      {
+        "re_min": "0xE6449D137A93E2B4",
+        "re_max": "0xE6449DA17FB2E114",
+        "im_min": "0x01767955C0425891",
+        "im_max": "0x01767A0919D1651C",
+        "re_min_f64": -1.6082486380680685,
+        "re_max_f64": -1.6082481090023248,
+        "im_min_f64": 0.09142430778969958,
+        "im_max_f64": 0.09142497591991486,
+        "point": 2,
+        "path": "OlUULLULuLLuLuLulULLULULULULLULUl"
+      }
+    ]
+  }
+}

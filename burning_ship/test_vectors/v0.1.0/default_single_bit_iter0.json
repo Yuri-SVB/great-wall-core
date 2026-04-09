@@ -1,0 +1,95 @@
+{
+  "version": "0.1.0",
+  "input": {
+    "entropy_hex": "80000000000000000000000000000000",
+    "entropy_bits": 128,
+    "bip39_mnemonic": "length abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+    "argon2_profile": "b",
+    "argon2_iterations": 0,
+    "gw_mode": "d"
+  },
+  "stage1": {
+    "params": {
+      "o": 0,
+      "p": 0,
+      "q": 0
+    },
+    "leaves": [
+      {
+        "re_min": "0x071926BB251DF0C8",
+        "re_max": "0x0719292C1559426F",
+        "im_min": "0xF0D7742595C0728E",
+        "im_max": "0xF0D777222AFD6A7F",
+        "re_min_f64": 0.44364045241843203,
+        "re_max_f64": 0.44364278049540984,
+        "im_min_f64": -0.9473989993893811,
+        "im_max_f64": -0.947396151095892,
+        "point": 1,
+        "path": "OrULULULUllULUlUlULulUluLULulULUL"
+      },
+      {
+        "re_min": "0xF118DA7204BA2B20",
+        "re_max": "0xF118DA9EF3B85290",
+        "im_min": "0xFC87A02A5B2747D1",
+        "im_max": "0xFC87A084BB379C93",
+        "re_min_f64": -0.9314322992471393,
+        "re_max_f64": -0.9314321318565634,
+        "im_min_f64": -0.21688826994572533,
+        "im_max_f64": -0.2168879332716863,
+        "point": 2,
+        "path": "OLULULUULLULULULULULuLULULULulUUL"
+      }
+    ]
+  },
+  "argon2": {
+    "input_hex": "8000000000000000",
+    "profile": "basic",
+    "iterations": 0,
+    "digests": [
+      {
+        "iteration": 0,
+        "hex": "8000000000000000000000000000000000000000000000000000000000000000"
+      }
+    ],
+    "final_digest": "8000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "stage2": {
+    "params": {
+      "o": "0x84B3F13B0A4FBCCE",
+      "p": "0x4C3F811E0313E00D",
+      "q": "0xCBD27431C229EFF5",
+      "o_re": 0.11254099477082491,
+      "o_im": -0.21539230830967426,
+      "p_re": 0.21095234714448452,
+      "p_im": 0.18384167697513476,
+      "q_re": -0.04296071923454292,
+      "q_im": -0.03422383897122927
+    },
+    "leaves": [
+      {
+        "re_min": "0xF3909523CF4DF72A",
+        "re_max": "0xF390954DEB741E9F",
+        "im_min": "0xF80B1B094C13611E",
+        "im_max": "0xF80B1B2E7CB55EB1",
+        "re_min_f64": -0.7772015191250168,
+        "re_max_f64": -0.7772013622532018,
+        "im_min_f64": -0.4972886692837972,
+        "im_max_f64": -0.4972885307403561,
+        "point": 1,
+        "path": "OLUlULuLLLuLULULUULULULULUULULULU"
+      },
+      {
+        "re_min": "0xF3909523CF4DF72A",
+        "re_max": "0xF390954DEB741E9F",
+        "im_min": "0xF80B1B094C13611E",
+        "im_max": "0xF80B1B2E7CB55EB1",
+        "re_min_f64": -0.7772015191250168,
+        "re_max_f64": -0.7772013622532018,
+        "im_min_f64": -0.4972886692837972,
+        "im_max_f64": -0.4972885307403561,
+        "point": 2,
+        "path": "OLUlULuLLLuLULULUULULULULUULULULU"
+      }
+    ]
+  }
+}

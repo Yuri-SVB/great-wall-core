@@ -1,0 +1,71 @@
+{
+  "version": "0.1.0",
+  "input": {
+    "entropy_hex": "0000000000000000",
+    "entropy_bits": 64,
+    "bip39_mnemonic": "abandon abandon abandon abandon abandon able",
+    "argon2_profile": "b",
+    "argon2_iterations": 0,
+    "gw_mode": "m"
+  },
+  "stage1": {
+    "params": {
+      "o": 0,
+      "p": 0,
+      "q": 0
+    },
+    "leaves": [
+      {
+        "re_min": "0xF118DA7204BA2B20",
+        "re_max": "0xF118DA9EF3B85290",
+        "im_min": "0xFC87A02A5B2747D1",
+        "im_max": "0xFC87A084BB379C93",
+        "re_min_f64": -0.9314322992471393,
+        "re_max_f64": -0.9314321318565634,
+        "im_min_f64": -0.21688826994572533,
+        "im_max_f64": -0.2168879332716863,
+        "point": 1,
+        "path": "OLULULUULLULULULULULuLULULULulUUL"
+      }
+    ]
+  },
+  "argon2": {
+    "input_hex": "00000000",
+    "profile": "basic",
+    "iterations": 0,
+    "digests": [
+      {
+        "iteration": 0,
+        "hex": "0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    ],
+    "final_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "stage2": {
+    "params": {
+      "o": "0x66687AADF862BD77",
+      "p": "0x6C8FC18B8E9F8E20",
+      "q": "0x089714856EE233B3",
+      "o_re": -0.23314389761071652,
+      "o_im": 0.17711672780569643,
+      "p_re": -0.12717051384970546,
+      "p_im": 0.22730244108242914,
+      "q_re": 0.05024364389828406,
+      "q_im": 0.039345655823126435
+    },
+    "leaves": [
+      {
+        "re_min": "0xF29589045511CB70",
+        "re_max": "0xF2958945AE9E3369",
+        "im_min": "0xF71FF56947009E26",
+        "im_max": "0xF71FF5911F37FFBF",
+        "re_min_f64": -0.8384923773545668,
+        "re_max_f64": -0.8384921339075958,
+        "im_min_f64": -0.5546975982287781,
+        "im_max_f64": -0.5546974497960947,
+        "point": 1,
+        "path": "OLULULULUlUUULUllUUluLULULULuLULU"
+      }
+    ]
+  }
+}

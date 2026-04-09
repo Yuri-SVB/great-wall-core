@@ -1,0 +1,79 @@
+{
+  "version": "0.1.0",
+  "input": {
+    "entropy_hex": "ffffffffffffffff",
+    "entropy_bits": 64,
+    "bip39_mnemonic": "zoo zoo zoo zoo zoo zebra",
+    "argon2_profile": "b",
+    "argon2_iterations": 3,
+    "gw_mode": "m"
+  },
+  "stage1": {
+    "params": {
+      "o": 0,
+      "p": 0,
+      "q": 0
+    },
+    "leaves": [
+      {
+        "re_min": "0x0CD19BCB4D55855E",
+        "re_max": "0x0CD19BFF34E06C3A",
+        "im_min": "0xE8AE733CBF20DE59",
+        "im_max": "0xE8AE7387877A1331",
+        "re_min_f64": 0.8011739675033324,
+        "re_max_f64": 0.8011741608625256,
+        "im_min_f64": -1.4574096324049113,
+        "im_max_f64": -1.4574093538179753,
+        "point": 1,
+        "path": "OrdrDRDRDRDRDRDrDRDRDRDRDrdDRRddr"
+      }
+    ]
+  },
+  "argon2": {
+    "input_hex": "ffffffff",
+    "profile": "basic",
+    "iterations": 3,
+    "digests": [
+      {
+        "iteration": 1,
+        "hex": "39f585cb6854c8603ff7c773d9d85066eadbb377b49f1ca36b356d63ffcb886f"
+      },
+      {
+        "iteration": 2,
+        "hex": "b44d69cb8a5bc28ae3dfa70699892dcb726127b73d1683076168da031f841fcd"
+      },
+      {
+        "iteration": 3,
+        "hex": "93ebd7824f7f9d6d398e88c2df6db94f70125720264dbc925241990b4c29bae2"
+      }
+    ],
+    "final_digest": "93ebd7824f7f9d6d398e88c2df6db94f70125720264dbc925241990b4c29bae2"
+  },
+  "stage2": {
+    "params": {
+      "o": "0x0437F1EFDEBBA7C4",
+      "p": "0xBC705EC86469B7F1",
+      "q": "0x225DEB90C81BE059",
+      "o_re": -0.0350565534317866,
+      "o_im": 0.24175995774567127,
+      "p_re": 0.19527737906901166,
+      "p_im": -0.1345101463375613,
+      "q_re": -0.037605136894853786,
+      "q_im": 0.002402999496553093
+    },
+    "leaves": [
+      {
+        "re_min": "0x07E2579169747CFA",
+        "re_max": "0x07E257BB2AFECD5E",
+        "im_min": "0xEB9CAEF6AD334644",
+        "im_max": "0xEB9CAF8F68E886B9",
+        "re_min_f64": 0.4927592926171933,
+        "re_max_f64": 0.4927594481704774,
+        "im_min_f64": -1.274247204227136,
+        "im_max_f64": -1.2742466352514994,
+        "point": 1,
+        "path": "ORdRDrDDRRdRDRDRDRDRdRDRDRDRDDrDr"
+      }
+    ]
+  }
+}

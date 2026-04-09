@@ -1,0 +1,79 @@
+{
+  "version": "0.1.0",
+  "input": {
+    "entropy_hex": "0000000000000000",
+    "entropy_bits": 64,
+    "bip39_mnemonic": "abandon abandon abandon abandon abandon able",
+    "argon2_profile": "b",
+    "argon2_iterations": 3,
+    "gw_mode": "m"
+  },
+  "stage1": {
+    "params": {
+      "o": 0,
+      "p": 0,
+      "q": 0
+    },
+    "leaves": [
+      {
+        "re_min": "0xF118DA7204BA2B20",
+        "re_max": "0xF118DA9EF3B85290",
+        "im_min": "0xFC87A02A5B2747D1",
+        "im_max": "0xFC87A084BB379C93",
+        "re_min_f64": -0.9314322992471393,
+        "re_max_f64": -0.9314321318565634,
+        "im_min_f64": -0.21688826994572533,
+        "im_max_f64": -0.2168879332716863,
+        "point": 1,
+        "path": "OLULULUULLULULULULULuLULULULulUUL"
+      }
+    ]
+  },
+  "argon2": {
+    "input_hex": "00000000",
+    "profile": "basic",
+    "iterations": 3,
+    "digests": [
+      {
+        "iteration": 1,
+        "hex": "99a070497fc7abcfea1f10ce9b3b5c882f23cce56e89b24135ee31d7bb62f9f0"
+      },
+      {
+        "iteration": 2,
+        "hex": "f467410b14fe72c21b89b42630119abe468f927fbc79c74c759d098580b819e9"
+      },
+      {
+        "iteration": 3,
+        "hex": "ce9b124406d793d54c9eca0cac9e13c7997056b610df178cfb749be6f9903db6"
+      }
+    ],
+    "final_digest": "ce9b124406d793d54c9eca0cac9e13c7997056b610df178cfb749be6f9903db6"
+  },
+  "stage2": {
+    "params": {
+      "o": "0x1B864BE9B2669977",
+      "p": "0x1824EAF23C72D5EA",
+      "q": "0x676CB9C70E5BDFAC",
+      "o_re": -0.23300704802386463,
+      "o_im": 0.1482634819112718,
+      "p_re": 0.16780720825772732,
+      "p_im": 0.1637404270004481,
+      "q_re": 0.013179639121517539,
+      "q_im": 0.0555698532552924
+    },
+    "leaves": [
+      {
+        "re_min": "0xEED3860057948249",
+        "re_max": "0xEED386397045DF8F",
+        "im_min": "0xFA2F5B22211CC6CC",
+        "im_max": "0xFA2F5B6BB5405DA6",
+        "re_min_f64": -1.0733585344921432,
+        "re_max_f64": -1.073358321791268,
+        "im_min_f64": -0.36343847912048793,
+        "im_max_f64": -0.36343820501858964,
+        "point": 1,
+        "path": "OlULULULUlUUlUlULUlUulULUlUULULUL"
+      }
+    ]
+  }
+}

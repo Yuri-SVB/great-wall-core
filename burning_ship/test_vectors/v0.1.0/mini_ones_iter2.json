@@ -1,0 +1,75 @@
+{
+  "version": "0.1.0",
+  "input": {
+    "entropy_hex": "ffffffffffffffff",
+    "entropy_bits": 64,
+    "bip39_mnemonic": "zoo zoo zoo zoo zoo zebra",
+    "argon2_profile": "b",
+    "argon2_iterations": 2,
+    "gw_mode": "m"
+  },
+  "stage1": {
+    "params": {
+      "o": 0,
+      "p": 0,
+      "q": 0
+    },
+    "leaves": [
+      {
+        "re_min": "0x0CD19BCB4D55855E",
+        "re_max": "0x0CD19BFF34E06C3A",
+        "im_min": "0xE8AE733CBF20DE59",
+        "im_max": "0xE8AE7387877A1331",
+        "re_min_f64": 0.8011739675033324,
+        "re_max_f64": 0.8011741608625256,
+        "im_min_f64": -1.4574096324049113,
+        "im_max_f64": -1.4574093538179753,
+        "point": 1,
+        "path": "OrdrDRDRDRDRDRDrDRDRDRDRDrdDRRddr"
+      }
+    ]
+  },
+  "argon2": {
+    "input_hex": "ffffffff",
+    "profile": "basic",
+    "iterations": 2,
+    "digests": [
+      {
+        "iteration": 1,
+        "hex": "39f585cb6854c8603ff7c773d9d85066eadbb377b49f1ca36b356d63ffcb886f"
+      },
+      {
+        "iteration": 2,
+        "hex": "b44d69cb8a5bc28ae3dfa70699892dcb726127b73d1683076168da031f841fcd"
+      }
+    ],
+    "final_digest": "b44d69cb8a5bc28ae3dfa70699892dcb726127b73d1683076168da031f841fcd"
+  },
+  "stage2": {
+    "params": {
+      "o": "0x92267409C9F57A6E",
+      "p": "0x4CE7C8EFCAB4CE50",
+      "q": "0x5A6E6FA62FB5B1B5",
+      "o_re": -0.11559557274449617,
+      "o_im": -0.14080197038128972,
+      "p_re": -0.1301024952554144,
+      "p_im": 0.24564343091333285,
+      "q_re": 0.04237144422950223,
+      "q_im": 0.024893247900763527
+    },
+    "leaves": [
+      {
+        "re_min": "0x109404E1B60DD81F",
+        "re_max": "0x109406D265134EC4",
+        "im_min": "0xEBC0EEFBAACF5A01",
+        "im_max": "0xEBC0F0D32B3F1031",
+        "re_min_f64": 1.0361374680368183,
+        "re_max_f64": 1.0361393183277021,
+        "im_min_f64": -1.2653970879792182,
+        "im_max_f64": -1.2653953314984925,
+        "point": 1,
+        "path": "OrdRDRDRDRDRDRdRdrdRrDDRRdDRdRDRD"
+      }
+    ]
+  }
+}

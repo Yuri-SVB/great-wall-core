@@ -1,0 +1,75 @@
+{
+  "version": "0.1.0",
+  "input": {
+    "entropy_hex": "df936139cbdefbc1",
+    "entropy_bits": 64,
+    "bip39_mnemonic": "test only example nut use this",
+    "argon2_profile": "b",
+    "argon2_iterations": 2,
+    "gw_mode": "m"
+  },
+  "stage1": {
+    "params": {
+      "o": 0,
+      "p": 0,
+      "q": 0
+    },
+    "leaves": [
+      {
+        "re_min": "0x0A7850405A4B10E4",
+        "re_max": "0x0A785051128CD686",
+        "im_min": "0xE9B4399BD8A55B5E",
+        "im_max": "0xE9B439AC32E45296",
+        "re_min_f64": 0.654373408677831,
+        "re_max_f64": 0.6543734709637669,
+        "im_min_f64": -1.3934997474913555,
+        "im_max_f64": -1.393499686573459,
+        "point": 1,
+        "path": "OrdLrDDdrDluRulrdldrUULldLURDruld"
+      }
+    ]
+  },
+  "argon2": {
+    "input_hex": "df936139",
+    "profile": "basic",
+    "iterations": 2,
+    "digests": [
+      {
+        "iteration": 1,
+        "hex": "d03fd5a3954a2c5f43204b1377ca5ade85db2fbb788723e50eec084b6c1a67dd"
+      },
+      {
+        "iteration": 2,
+        "hex": "e9d4cd8dae9a20bd60d51e5235a906c8b06a4ce82947df70f1de2121b2959dfa"
+      }
+    ],
+    "final_digest": "e9d4cd8dae9a20bd60d51e5235a906c8b06a4ce82947df70f1de2121b2959dfa"
+  },
+  "stage2": {
+    "params": {
+      "o": "0xB9CC599D2ADD7DD8",
+      "p": "0xBC9270BEF61F8405",
+      "q": "0xECFCC8694684D88A",
+      "o_re": 0.027094771387055516,
+      "o_im": -0.18125229491852224,
+      "p_re": -0.2031897934502922,
+      "p_im": -0.18606240476947278,
+      "q_re": 0.01980126419221051,
+      "q_im": -0.036639449041103944
+    },
+    "leaves": [
+      {
+        "re_min": "0xFE62FA3CCFD28F26",
+        "re_max": "0xFE62FAD85A9E9CA5",
+        "im_min": "0xECA630D7AB5AF315",
+        "im_max": "0xECA6312F9E9720D2",
+        "re_min_f64": -0.10083557362926518,
+        "re_max_f64": -0.10083499418950556,
+        "im_min_f64": -1.209426076451851,
+        "im_max_f64": -1.2094257488120588,
+        "point": 1,
+        "path": "ORdLurlrDRRUrdrDurdRDruRdrdlUluLd"
+      }
+    ]
+  }
+}

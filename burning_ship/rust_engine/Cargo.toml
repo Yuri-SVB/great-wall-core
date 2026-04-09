@@ -1,0 +1,16 @@
+[package]
+name = "burning_ship_engine"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[features]
+verbose = []
+
+[lib]
+name = "burning_ship_engine"
+crate-type = ["cdylib"]
+
+[dependencies]
+rayon = "1.10"
+argon2 = "0.5"

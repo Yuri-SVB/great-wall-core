@@ -1,0 +1,7 @@
+*.so
+*.o
+*.pyc
+__pycache__/
+.venv/
+.argon2_checkpoint_*
+.idea

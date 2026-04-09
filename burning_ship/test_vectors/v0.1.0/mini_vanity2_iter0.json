@@ -1,0 +1,71 @@
+{
+  "version": "0.1.0",
+  "input": {
+    "entropy_hex": "951df78327313d56",
+    "entropy_bits": 64,
+    "bip39_mnemonic": "never use this example because prison",
+    "argon2_profile": "b",
+    "argon2_iterations": 0,
+    "gw_mode": "m"
+  },
+  "stage1": {
+    "params": {
+      "o": 0,
+      "p": 0,
+      "q": 0
+    },
+    "leaves": [
+      {
+        "re_min": "0x090CEA8BE71B5F40",
+        "re_max": "0x090CEA91A6718FB2",
+        "im_min": "0xF01A7C46B4794B18",
+        "im_max": "0xF01A7C4C313BCDDF",
+        "re_min_f64": 0.5656533684684388,
+        "re_max_f64": 0.5656533898792054,
+        "im_min_f64": -0.9935338247382053,
+        "im_max_f64": -0.9935338042962596,
+        "point": 1,
+        "path": "OrULdLruRulURdrurdrRdurrdrlUUludD"
+      }
+    ]
+  },
+  "argon2": {
+    "input_hex": "951df783",
+    "profile": "basic",
+    "iterations": 0,
+    "digests": [
+      {
+        "iteration": 0,
+        "hex": "951df78300000000000000000000000000000000000000000000000000000000"
+      }
+    ],
+    "final_digest": "951df78300000000000000000000000000000000000000000000000000000000"
+  },
+  "stage2": {
+    "params": {
+      "o": "0x8870023505270EEF",
+      "p": "0xC7CE9BD73827EDE2",
+      "q": "0xCA37A1F843EC0948",
+      "o_re": 0.24164159037172794,
+      "o_im": -0.1682131001725793,
+      "p_re": 0.16001871309708804,
+      "p_im": -0.24016085179755464,
+      "q_re": 0.00453206806560047,
+      "q_im": -0.007696078420849517
+    },
+    "leaves": [
+      {
+        "re_min": "0xE63E83668C2296D9",
+        "re_max": "0xE63E85802C391501",
+        "im_min": "0xFA4D0422213CD1A7",
+        "im_max": "0xFA4D05D329B87A21",
+        "re_min_f64": -1.609737967895706,
+        "re_max_f64": -1.6097359650852308,
+        "im_min_f64": -0.35619723003419385,
+        "im_max_f64": -0.35619561686005013,
+        "point": 1,
+        "path": "OlUdLLdrDlURDluldlUdRdRuRURLDlDRu"
+      }
+    ]
+  }
+}

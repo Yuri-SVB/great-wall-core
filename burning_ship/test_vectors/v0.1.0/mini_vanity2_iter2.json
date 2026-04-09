@@ -1,0 +1,75 @@
+{
+  "version": "0.1.0",
+  "input": {
+    "entropy_hex": "951df78327313d56",
+    "entropy_bits": 64,
+    "bip39_mnemonic": "never use this example because prison",
+    "argon2_profile": "b",
+    "argon2_iterations": 2,
+    "gw_mode": "m"
+  },
+  "stage1": {
+    "params": {
+      "o": 0,
+      "p": 0,
+      "q": 0
+    },
+    "leaves": [
+      {
+        "re_min": "0x090CEA8BE71B5F40",
+        "re_max": "0x090CEA91A6718FB2",
+        "im_min": "0xF01A7C46B4794B18",
+        "im_max": "0xF01A7C4C313BCDDF",
+        "re_min_f64": 0.5656533684684388,
+        "re_max_f64": 0.5656533898792054,
+        "im_min_f64": -0.9935338247382053,
+        "im_max_f64": -0.9935338042962596,
+        "point": 1,
+        "path": "OrULdLruRulURdrurdrRdurrdrlUUludD"
+      }
+    ]
+  },
+  "argon2": {
+    "input_hex": "951df783",
+    "profile": "basic",
+    "iterations": 2,
+    "digests": [
+      {
+        "iteration": 1,
+        "hex": "dbc430b655da526a4772eb76776e7aa1d59ac2ca2314164bf25e18b9aaf35bd0"
+      },
+      {
+        "iteration": 2,
+        "hex": "55733ccfedbeff9214dcd701cfb6c0edfdf97b835b3214782ffab0534130c387"
+      }
+    ],
+    "final_digest": "55733ccfedbeff9214dcd701cfb6c0edfdf97b835b3214782ffab0534130c387"
+  },
+  "stage2": {
+    "params": {
+      "o": "0xCC6E3AC5A57A104F",
+      "p": "0x9E8441FE764F946D",
+      "q": "0xA282A233245F622D",
+      "o_re": -0.2363600528333336,
+      "o_im": -0.15953240089584142,
+      "p_re": 0.21394719503587112,
+      "p_im": -0.18725992343388498,
+      "q_re": 0.044013001548592,
+      "q_im": -0.04987073416123167
+    },
+    "leaves": [
+      {
+        "re_min": "0xE70A8985AADB9237",
+        "re_max": "0xE70A8B37A3181FC1",
+        "im_min": "0xFA134DA3D0008A71",
+        "im_max": "0xFA134E7B9E6DF7FE",
+        "re_min_f64": -1.559927442418736,
+        "re_max_f64": -1.5599258257557196,
+        "im_min_f64": -0.37028728495348895,
+        "im_max_f64": -0.37028648101216,
+        "point": 1,
+        "path": "OlUdLLdrDLuRruluRLuRdrDURUruRlDru"
+      }
+    ]
+  }
+}
