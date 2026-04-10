@@ -2491,12 +2491,13 @@ def main():
         # Draw panel
         draw_panel(screen, state, font, small_font)
 
-        # Coordinate display at cursor
-        mx, my = pygame.mouse.get_pos()
-        if my < state.vp_h:
-            re, im = state.screen_to_complex(mx, my)
-            coord_txt = small_font.render(f"({re:.8f}, {im:.8f})", True, (200, 200, 200))
-            screen.blit(coord_txt, (state.vp_w - coord_txt.get_width() - 5, 5))
+        # Coordinate display at cursor (debug mode only)
+        if state.debug_mode:
+            mx, my = pygame.mouse.get_pos()
+            if my < state.vp_h:
+                re, im = state.screen_to_complex(mx, my)
+                coord_txt = small_font.render(f"({re:.8f}, {im:.8f})", True, (200, 200, 200))
+                screen.blit(coord_txt, (state.vp_w - coord_txt.get_width() - 5, 5))
 
         pygame.display.flip()
         clock.tick(30)
