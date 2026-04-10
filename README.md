@@ -6,6 +6,66 @@ locations, with Argon2-based two-stage pipeline.
 Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE)
 or [MIT License](LICENSE-MIT) at your option.
 
+## Why Great Wall?
+
+Protecting a Bitcoin seed phrase is a problem with no good conventional
+solution. Every existing approach sacrifices at least one desirable
+property. Great Wall provides all four at once:
+
+1. **Knowledge-Based Authentication.** Your secret lives entirely in your
+   memory — no device, physical vault, or geographic location required.
+2. **Individual Custody.** You depend on no one else. The core premise of
+   Bitcoin — full self-custody — is kept intact.
+3. **Non-Obscurity.** The method is not a secret trick that fails the
+   moment an attacker learns about it. Nor does it rely on convincing the
+   attacker that the stash doesn't exist or is smaller than it really is.
+4. **Coercion-Resistance.** The threat of violence is ineffective as a
+   means to obtain the secret leading to the stash.
+
+> **In one sentence:** it's all in your head (1), in nobody else's (2),
+> the attacker is aware of that (3), and is nevertheless unable to rob
+> it (4).
+
+This sounds like having your pie and eating it too — many times over. It
+is only possible because the secret knowledge (that is only in your head)
+is *tacit*, and the interface for *deploying* it (to convert it into a key)
+is gated by an inescapably lengthy computation.
+
+### How it works (the simple version)
+
+The Burning Ship fractals are indescribable labyrinths. Great Wall converts
+your secret into exact coordinates on these labyrinths.
+
+Your memory of *where* those points are is **tacit knowledge** — the same
+kind of knowledge that lets you recognize a friend's face but not describe
+it precisely enough for a stranger to pick them out of a crowd. You can
+identify your locations by looking at the fractal, but you literally
+cannot dictate them to someone else. There is no verbal shortcut: the
+only way to extract the secret is to sit in front of the fractal and
+point.
+
+Great Wall splits your secret into two halves. The first half is encoded
+on the standard fractal. But before the second half can be encoded *or
+decoded*, the system requires a long, memory-intensive computation using
+Argon2 — a key-stretching algorithm where each step depends on the
+previous one (strictly sequential) and requires gigabytes of RAM that
+cannot be traded for speed. The delay is configurable: hours, days, or
+weeks. The computation produces a unique key that reshapes the fractal
+itself — generating a *new, private* labyrinth that only your
+first-half secret can unlock.
+
+The second-stage fractal **does not exist** until this computation
+finishes. No one — not even a fully cooperative user — can reveal the
+second-half locations any faster, because there is nothing to point at
+until Argon2 is done.
+
+This is why coercion fails: the user **cannot verbalize** their fractal
+locations (tacit knowledge), and the second-stage fractal **cannot be
+materialized** without completing the full Argon2 computation. Coercing
+the user into giving up the entire secret effectively requires kidnapping
+them for at least as long as the Argon2 delay — hours, days, or weeks.
+That is the wall.
+
 ## Burning Ship Seed Encoder (`burning_ship/`)
 
 Bijective mapping between BIP39 mnemonic seeds and locations in the
