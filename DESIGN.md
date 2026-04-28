@@ -794,7 +794,8 @@ P1‖P2 (64 bits of raw entropy)
 Argon2d(input, salt="greatwall", profile=Basic|Advanced|GreatWall)
     │   Iterated N times (configurable in the panel).
     │   Each iteration feeds the previous 32-byte digest back as input.
-    │   Intermediate digests are checkpointed to disk for resume/trial-and-error.
+    │   Intermediate digests are checkpointed to disk *only* when the
+    │   "save intermediate" checkbox is on (off by default — see below).
     ▼
 SHA-256(digest)[0:8]         First 8 bytes → uint64 *p*
     │                        Bits 0–31  → Re(p):  bit j ⟹ −2^{−(3+j)}
@@ -814,6 +815,44 @@ serves two purposes:
 2. **Trial-and-error on iteration count**: if the user forgets the exact number
    of external iterations, they can try nearby values cheaply — each is a simple
    lookup + stage-2 encode, no re-hashing required.
+
+##### Gating: the "save intermediate" checkbox (off by default)
+
+Checkpointing is gated by a checkbox in the Argon2 row of the viewer panel,
+mirrored by the `state.argon2_save_intermediate` flag (default: `False`).
+When the flag is **off**, `run_argon2_iterative()` and `run_random_encode()`
+neither read nor write any checkpoint file — the derivation runs fully
+in-memory and the only persistent output is the final digest written into
+the session JSON (when the user explicitly saves one).
+
+This default is deliberate.  An intermediate-state file is exactly the
+artifact that lets an attacker bypass the time cost Argon2 imposes: if
+iteration 9 999 of a 10 000-iteration target sits on disk, the entire
+derivation collapses to a single Argon2d pass.  Convenience features
+(resume, trial-and-error) must therefore be opt-in, never default.
+
+**User responsibility (documented in README and on toggling the checkbox in
+the status bar):** when the flag is on, the user is responsible for
+*securely* deleting the checkpoint file (`shred`, `srm`, encrypted-volume
+unmount, etc.) once it has served its purpose.  The core viewer does **not**
+auto-delete, because it cannot know when "purpose fulfilled" is true from
+the user's perspective, and an incorrect guess would either erase state
+still needed for resumption or leave a forgotten file behind.
+
+**Sibling repositories** in the Great Wall family will abstract this
+complexity away from the user experience.  They wrap this core engine with:
+
+- **Time-Lock-Puzzle (TLP) cryptographic gating** of intermediate states —
+  so a leaked checkpoint file is not directly usable until its TLP solves,
+  re-imposing a (smaller, but non-zero) time cost on the attacker even if
+  the file is exfiltrated.
+- **Automatic secure deletion** of intermediary derivation states once they
+  are no longer needed by the workflow.
+
+This core repository intentionally exposes the raw mechanism without those
+ergonomic wrappers: it is the substrate those sibling tools build on, and
+the explicit checkbox + status-bar warning make the trade-off impossible to
+overlook for a developer or power user working directly with this engine.
 
 ### Stage 2: Encoding (mnemonic → P3, P4)
 

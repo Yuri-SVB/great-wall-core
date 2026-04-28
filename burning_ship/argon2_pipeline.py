@@ -83,10 +83,19 @@ def run_argon2_iterative(state, gui_iterations):
     feeds the 32-byte digest back as input for the next iteration.
     gui_iterations=0 means identity (no Argon2).
 
-    Intermediate digests are checkpointed to disk for resumption.
+    When state.argon2_save_intermediate is True, intermediate digests are
+    checkpointed to disk so the computation can be resumed after interruption
+    or so the user can probe nearby iteration counts cheaply.  When False
+    (the default), no on-disk state is written or read — preserving the full
+    time-cost barrier that Argon2 derivation is meant to impose.
+
+    SECURITY: when this flag is on, any leftover checkpoint file lets an
+    attacker skip the wall-clock cost.  It is the user's responsibility to
+    delete it (securely) once it has served its purpose.
     """
     stage1_bits = state.argon2_stage1_bits
     profile = state.argon2_profile
+    save_intermediate = getattr(state, "argon2_save_intermediate", False)
 
     def _worker():
         try:
@@ -94,7 +103,7 @@ def run_argon2_iterative(state, gui_iterations):
             if gui_iterations == 0:
                 digest = data.ljust(ARGON2_DIGEST_BYTES, b'\x00')[:ARGON2_DIGEST_BYTES]
                 state.argon2_progress = 1
-            else:
+            elif save_intermediate:
                 input_hex = data.hex()
                 ckpt_path = _checkpoint_path(input_hex, profile)
                 saved = _load_checkpoint(ckpt_path)
@@ -119,6 +128,12 @@ def run_argon2_iterative(state, gui_iterations):
                     cur_it = i + 1
                     _save_checkpoint(ckpt_path, cur_it, digest)
                     state.argon2_progress = cur_it
+            else:
+                digest = argon2_single(data, profile)
+                state.argon2_progress = 1
+                for i in range(1, gui_iterations):
+                    digest = argon2_single(digest, profile)
+                    state.argon2_progress = i + 1
 
             state.argon2_digest = digest.hex()
             state.stage2_o, state.stage2_o_re, state.stage2_o_im, \
@@ -255,10 +270,11 @@ def run_random_encode(state):
 
             # Argon2 hash
             data = bits_to_bytes(stage1_bits)
+            save_intermediate = getattr(state, "argon2_save_intermediate", False)
             if iters == 0:
                 digest = data.ljust(ARGON2_DIGEST_BYTES, b'\x00')[:ARGON2_DIGEST_BYTES]
                 state.argon2_progress = 1
-            else:
+            elif save_intermediate:
                 input_hex = data.hex()
                 ckpt_path = _checkpoint_path(input_hex, profile)
                 saved = _load_checkpoint(ckpt_path)
@@ -278,6 +294,12 @@ def run_random_encode(state):
                 for i in range(resume_it, iters):
                     digest = argon2_single(digest, profile)
                     _save_checkpoint(ckpt_path, i + 1, digest)
+                    state.argon2_progress = i + 1
+            else:
+                digest = argon2_single(data, profile)
+                state.argon2_progress = 1
+                for i in range(1, iters):
+                    digest = argon2_single(digest, profile)
                     state.argon2_progress = i + 1
 
             state.argon2_digest = digest.hex()

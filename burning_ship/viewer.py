@@ -218,6 +218,7 @@ class ViewerState:
         self.argon2_progress_total = 0     # total iterations requested
         self.argon2_stage1_bits = None     # cached 64-bit list from encode/decode
         self.argon2_profile = PROFILE_BASIC  # 0=Basic, 1=Advanced, 2=Great Wall
+        self.argon2_save_intermediate = False  # checkpoint intermediate digests (off by default)
         self.stage1_path = "O"              # accumulated path after stage 1
         self.argon2_marker = ""             # e.g. "B0", "A100"
 
@@ -1146,6 +1147,28 @@ def draw_panel(screen, state, font, small_font):
     state._argon2_hash_btn_rect = hash_btn
     sx += hash_w + 8
 
+    # Intermediate-state checkbox (save/load checkpoint file).  Off by default:
+    # leaving intermediate digests on disk would defeat the time-cost barrier
+    # that Argon2 derivation is meant to impose.
+    cb_size = 14
+    cb_rect = pygame.Rect(sx, y + 3, cb_size, cb_size)
+    pygame.draw.rect(screen, (20, 20, 30), cb_rect)
+    cb_border = (255, 200, 100) if state.argon2_save_intermediate else (80, 80, 100)
+    pygame.draw.rect(screen, cb_border, cb_rect, 1)
+    if state.argon2_save_intermediate:
+        pygame.draw.line(screen, (255, 200, 100),
+                         (cb_rect.x + 2, cb_rect.y + cb_size // 2),
+                         (cb_rect.x + cb_size // 2, cb_rect.bottom - 3), 2)
+        pygame.draw.line(screen, (255, 200, 100),
+                         (cb_rect.x + cb_size // 2, cb_rect.bottom - 3),
+                         (cb_rect.right - 2, cb_rect.y + 2), 2)
+    state._argon2_save_intermediate_rect = cb_rect
+    sx += cb_size + 4
+    cb_label_color = (255, 200, 100) if state.argon2_save_intermediate else (150, 150, 170)
+    cb_label = small_font.render("save intermediate", True, cb_label_color)
+    screen.blit(cb_label, (sx, y + 2))
+    sx += cb_label.get_width() + 8
+
     # Progress bar or digest
     if state.argon2_running and state.argon2_progress_total > 0:
         # Progress bar
@@ -2007,6 +2030,16 @@ def main():
                         state.debug_p_im_focused = False
                         state.debug_q_re_focused = False
                         state.debug_q_im_focused = False
+                    elif hasattr(state, '_argon2_save_intermediate_rect') and state._argon2_save_intermediate_rect.collidepoint(mx, my):
+                        if not state.argon2_running:
+                            state.argon2_save_intermediate = not state.argon2_save_intermediate
+                            if state.argon2_save_intermediate:
+                                state.status_msg = ("Save intermediate ON: checkpoint file will be written. "
+                                                    "Delete it manually after use to preserve the time-cost barrier.")
+                                state.status_color = CLR_WARNING
+                            else:
+                                state.status_msg = "Save intermediate OFF (no on-disk Argon2 state)"
+                                state.status_color = CLR_NEUTRAL
                     elif hasattr(state, '_esc_transform_rect') and state._esc_transform_rect.collidepoint(mx, my):
                         state.esc_transform_idx = (state.esc_transform_idx + 1) % len(ESC_TRANSFORMS)
                         name = ESC_TRANSFORM_NAMES[state.esc_transform_idx]

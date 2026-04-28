@@ -182,6 +182,44 @@ stage-2 fractal parameters (o, p, q).
 formula with the Argon2-derived parameters, producing a different
 fractal with a different area tree.
 
+### Argon2 Intermediate-State Checkpoints
+
+Next to the Argon2 *Hash* button there is a **save intermediate**
+checkbox. It is **off by default**.
+
+- **Off (default):** the iterative Argon2 derivation is run from scratch
+  and only the final digest is kept in memory. Nothing is written to
+  disk. This preserves the wall-clock barrier — interrupting the
+  computation forces a full restart, exactly as intended.
+- **On:** every iteration's digest is appended to a checkpoint file
+  (`.argon2_checkpoint_{input_hex}_{profile}.bin`) next to
+  `argon2_pipeline.py`. On a subsequent run with the same input and
+  profile, the highest saved iteration ≤ the target is used as the
+  starting point. This is convenient for resuming after interruption,
+  for trying nearby iteration counts when the exact target is
+  forgotten, and for development.
+
+> **Security note — your responsibility:** an intermediate-state file
+> is precisely the artifact that lets an attacker skip the time cost
+> Argon2 was meant to impose. **It is the user's responsibility to
+> delete intermediate-state files (securely — e.g. `shred`, `srm`, or
+> equivalent) once they have served their purpose.** Leaving them on
+> disk defeats the entire point of the derivation. The core viewer
+> deliberately does *not* auto-delete: it cannot know when "their
+> purpose has been fulfilled" from the user's perspective, and a wrong
+> guess would either delete state still needed for resumption or leave
+> a forgotten file behind.
+
+> **Sibling repositories** in the Great Wall family will abstract this
+> complexity away from the UX. They wrap the core engine with
+> Time-Lock-Puzzle (TLP) cryptographic gating of intermediate states
+> and automatic secure deletion of intermediate derivation states once
+> they are no longer needed — so end users don't have to manage
+> checkpoint hygiene by hand. This core repository intentionally
+> exposes the raw mechanism: it is the substrate those sibling tools
+> build on, and surfaces the trade-off explicitly so it is impossible
+> to forget.
+
 ### Manual Bit-Input Mode
 
 Press `M` to enter manual mode. Use `O` (bit 0) and `I` (bit 1) to
