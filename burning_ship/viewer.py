@@ -1198,44 +1198,23 @@ def draw_panel(screen, state, font, small_font):
         dig_label = small_font.render(f"out: {state.argon2_digest}", True, (100, 220, 255))
         screen.blit(dig_label, (sx, y + 2))
 
-    # Stage indicator and stage-2 parameters
+    # Stage indicator and stage-2 parameters.  In debug mode, the verbose
+    # per-parameter Re/Im (and hex) values are NOT rendered here — they
+    # would overflow the panel width and force a wrap that pushes the
+    # o/p/q input rows past the panel's bottom edge.  Instead they are
+    # appended to each o/p/q hex input row below, using the unused
+    # right-side space.
     y += 22
     if state.stage == 2 and state.stage2_p is not None:
-        if state.debug_mode:
-            o_str = ""
-            if state.stage2_o is not None:
-                o_str = f"  o=0x{state.stage2_o:016X}  Re(o)={state.stage2_o_re:.8f}  Im(o)={state.stage2_o_im:.8f}"
-            p_str = f"  p=0x{state.stage2_p:016X}  Re(p)={state.stage2_p_re:.8f}  Im(p)={state.stage2_p_im:.8f}"
-            q_str = ""
-            if state.stage2_q is not None:
-                q_str = f"  q=0x{state.stage2_q:016X}  Re(q)={state.stage2_q_re:.8f}  Im(q)={state.stage2_q_im:.8f}"
-            s2_txt = small_font.render(
-                f"[Stage 2 ACTIVE]{o_str}{p_str}{q_str}",
-                True, (140, 255, 140),
-            )
-        else:
-            s2_txt = small_font.render(
-                "[Stage 2 ACTIVE]",
-                True, (140, 255, 140),
-            )
+        s2_txt = small_font.render(
+            "[Stage 2 ACTIVE]",
+            True, (140, 255, 140),
+        )
     elif state.stage2_p is not None:
-        if state.debug_mode:
-            o_part = ""
-            if state.stage2_o is not None:
-                o_part = f"  Re(o)={state.stage2_o_re:.6f} Im(o)={state.stage2_o_im:.6f}"
-            p_part = f"  Re(p)={state.stage2_p_re:.6f} Im(p)={state.stage2_p_im:.6f}"
-            q_part = ""
-            if state.stage2_q is not None:
-                q_part = f"  Re(q)={state.stage2_q_re:.6f} Im(q)={state.stage2_q_im:.6f}"
-            s2_txt = small_font.render(
-                f"[Stage 1] (Stage 2 ready:{o_part}{p_part}{q_part}, press T)",
-                True, (180, 220, 140),
-            )
-        else:
-            s2_txt = small_font.render(
-                "[Stage 1] (Stage 2 ready, press T)",
-                True, (180, 220, 140),
-            )
+        s2_txt = small_font.render(
+            "[Stage 1] (Stage 2 ready, press T)",
+            True, (180, 220, 140),
+        )
     else:
         preset_label = f"{state.size_preset} ({state.bip39_words} words /{state.entropy_bits} bits)"
         s2_txt = small_font.render(
@@ -1289,6 +1268,13 @@ def draw_panel(screen, state, font, small_font):
         state._debug_o_im_rect = o_im_rect
         sx += o_im_fw + 8
 
+        # Active stage-2 o value, rendered in the unused right-side space.
+        if state.stage2_o is not None:
+            o_active = small_font.render(
+                f"→ 0x{state.stage2_o:016X}  Re(o)={state.stage2_o_re:.6f}  Im(o)={state.stage2_o_im:.6f}",
+                True, (140, 200, 140))
+            screen.blit(o_active, (sx, y + 2))
+
         # p (additive perturbation) hex fields
         y += 22
         sx = x
@@ -1332,6 +1318,13 @@ def draw_panel(screen, state, font, small_font):
         state._debug_p_im_rect = im_rect
         sx += im_fw + 8
 
+        # Active stage-2 p value, rendered in the unused right-side space.
+        if state.stage2_p is not None:
+            p_active = small_font.render(
+                f"→ 0x{state.stage2_p:016X}  Re(p)={state.stage2_p_re:.6f}  Im(p)={state.stage2_p_im:.6f}",
+                True, (140, 200, 140))
+            screen.blit(p_active, (sx, y + 2))
+
         # q (linear perturbation) hex fields
         y += 22
         sx = x
@@ -1372,6 +1365,14 @@ def draw_panel(screen, state, font, small_font):
                 pygame.draw.line(screen, (220, 220, 240), (cx, y + 2), (cx, y + 16), 1)
         state._debug_q_im_rect = q_im_rect
         sx += q_im_fw + 8
+
+        # Active stage-2 q value, rendered before the "Go" button.
+        if state.stage2_q is not None:
+            q_active = small_font.render(
+                f"→ 0x{state.stage2_q:016X}  Re(q)={state.stage2_q_re:.6f}  Im(q)={state.stage2_q_im:.6f}",
+                True, (140, 200, 140))
+            screen.blit(q_active, (sx, y + 2))
+            sx += q_active.get_width() + 8
 
         # "Go" button — apply manual hex o,p,q and switch to stage 2
         go_btn = pygame.Rect(sx, y, 36, 20)
