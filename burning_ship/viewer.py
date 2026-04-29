@@ -1874,14 +1874,19 @@ def main():
                                 state.status_msg = f"Step {state.area_focus_step}/{total-1}"
                                 state.status_color = CLR_NEUTRAL
                     elif event.key == pygame.K_l:
+                        # Brightness adjust.  In select mode, do NOT overwrite
+                        # the status bar — clobbering the "Point N/M selected"
+                        # feedback used to look like a forced restart from 0.
                         state.brightness_exponent_offset += BRIGHTNESS_OFFSET_STEP
-                        state.status_msg = f"Brightness offset {state.brightness_exponent_offset:+.1f}"
-                        state.status_color = CLR_NEUTRAL
+                        if not state.select_mode:
+                            state.status_msg = f"Brightness offset {state.brightness_exponent_offset:+.1f}"
+                            state.status_color = CLR_NEUTRAL
                         state.needs_repalette = True
                     elif event.key == pygame.K_k:
                         state.brightness_exponent_offset -= BRIGHTNESS_OFFSET_STEP
-                        state.status_msg = f"Brightness offset {state.brightness_exponent_offset:+.1f}"
-                        state.status_color = CLR_NEUTRAL
+                        if not state.select_mode:
+                            state.status_msg = f"Brightness offset {state.brightness_exponent_offset:+.1f}"
+                            state.status_color = CLR_NEUTRAL
                         state.needs_repalette = True
                     elif event.key in (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4, pygame.K_5):
                         idx = event.key - pygame.K_1
