@@ -65,29 +65,38 @@ DEFAULT_BIP39_MNEMONIC = (
 # Perturbation encoding parameters
 # ---------------------------------------------------------------------------
 
-# Origin o (orbit seed z₀) — no baseline
+# o, p, q are all 64-bit reservoirs of entropy that select a private
+# stage-2 fractal.  They share a uniform encoding (32-bit Re magnitude +
+# 32-bit Im magnitude with sign bits at positions 31 and 63).  The only
+# operational difference is that p carries a baseline (P_BASELINE_EXP)
+# which steers the additive shift away from the canonical formula's
+# degenerate-tail region.  Listed below in alphabetic order.
+
+# Orbit seed o — entropy reservoir; no baseline
 O_MAGNITUDE_BITS = 31
 O_SIGN_BIT_RE = 31
 O_SIGN_BIT_IM = 63
 O_MAGNITUDE_MIN_EXP = 3
 
-# Additive shift p
+# Additive perturbation p — entropy reservoir; baseline = 2^{-P_BASELINE_EXP}
+# steers p away from the canonical-formula tail (degenerate leaf areas).
 P_MAGNITUDE_BITS = 31
 P_SIGN_BIT_RE = 31
 P_SIGN_BIT_IM = 63
 P_MAGNITUDE_MIN_EXP = 4
 P_BASELINE_EXP = 3                # baseline = 2^{-3} = 1/8
 
-# Linear perturbation q (εz term) — no baseline
+# Linear perturbation q (εz term) — entropy reservoir; no baseline
 Q_MAGNITUDE_BITS = 31
 Q_SIGN_BIT_RE = 31
 Q_SIGN_BIT_IM = 63
 Q_MAGNITUDE_MIN_EXP = 5
 
-# Stage-1 fixed parameters
-STAGE1_O = 0   # orbit seed: o=0 means z₀=0 (standard Burning Ship)
-STAGE1_P = 0   # decodes to baseline (+1/8, +1/8)
-STAGE1_Q = 0   # linear term: q=0 means no εz term
+# Stage-1 fixed parameters: all three set to 0 yields the canonical
+# Burning Ship formula (z₀=0, no additive shift, no linear term).
+STAGE1_O = 0   # o=0 ⇒ orbit seed z₀ = 0
+STAGE1_P = 0   # p=0 ⇒ additive shift only the baseline (+1/8, +1/8)
+STAGE1_Q = 0   # q=0 ⇒ no εz term
 
 # ---------------------------------------------------------------------------
 # Argon2

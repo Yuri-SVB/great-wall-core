@@ -222,16 +222,22 @@ class ViewerState:
         self.stage1_path = "O"              # accumulated path after stage 1
         self.argon2_marker = ""             # e.g. "B0", "A100"
 
-        # Stage-2 fractal parameters (derived from Argon2 digest)
-        self.stage2_o = None     # uint64 orbit seed encoding
-        self.stage2_o_re = None  # float display value of Re(z₀)
-        self.stage2_o_im = None  # float display value of Im(z₀)
-        self.stage2_p = None     # uint64 additive perturbation encoding
+        # Stage-2 fractal parameters (derived from Argon2 digest).  o, p, q
+        # are all 64-bit reservoirs of entropy that select a private fractal
+        # from the second-stage space; the only operational difference is
+        # that p carries a baseline (constants.P_BASELINE_EXP) to steer the
+        # additive shift away from the canonical formula's degenerate-tail
+        # region.  Listed in alphabetic order to match all other o/p/q
+        # appearances in code and GUI.
+        self.stage2_o = None     # uint64 orbit seed
+        self.stage2_o_re = None  # float display value of Re(o)
+        self.stage2_o_im = None  # float display value of Im(o)
+        self.stage2_p = None     # uint64 additive perturbation
         self.stage2_p_re = None  # float display value of Re(p)
         self.stage2_p_im = None  # float display value of Im(p)
-        self.stage2_q = None     # uint64 linear perturbation encoding
-        self.stage2_q_re = None  # float display value of Re(ε)
-        self.stage2_q_im = None  # float display value of Im(ε)
+        self.stage2_q = None     # uint64 linear perturbation
+        self.stage2_q_re = None  # float display value of Re(q)
+        self.stage2_q_im = None  # float display value of Im(q)
 
         # Active rendering stage (1 = canonical d=2, 2 = perturbed)
         self.stage = 1
@@ -1199,8 +1205,12 @@ def draw_panel(screen, state, font, small_font):
             o_str = ""
             if state.stage2_o is not None:
                 o_str = f"  o=0x{state.stage2_o:016X}  Re(o)={state.stage2_o_re:.8f}  Im(o)={state.stage2_o_im:.8f}"
+            p_str = f"  p=0x{state.stage2_p:016X}  Re(p)={state.stage2_p_re:.8f}  Im(p)={state.stage2_p_im:.8f}"
+            q_str = ""
+            if state.stage2_q is not None:
+                q_str = f"  q=0x{state.stage2_q:016X}  Re(q)={state.stage2_q_re:.8f}  Im(q)={state.stage2_q_im:.8f}"
             s2_txt = small_font.render(
-                f"[Stage 2 ACTIVE] p=0x{state.stage2_p:016X}  Re(p)={state.stage2_p_re:.8f}  Im(p)={state.stage2_p_im:.8f}{o_str}",
+                f"[Stage 2 ACTIVE]{o_str}{p_str}{q_str}",
                 True, (140, 255, 140),
             )
         else:
@@ -1210,8 +1220,15 @@ def draw_panel(screen, state, font, small_font):
             )
     elif state.stage2_p is not None:
         if state.debug_mode:
+            o_part = ""
+            if state.stage2_o is not None:
+                o_part = f"  Re(o)={state.stage2_o_re:.6f} Im(o)={state.stage2_o_im:.6f}"
+            p_part = f"  Re(p)={state.stage2_p_re:.6f} Im(p)={state.stage2_p_im:.6f}"
+            q_part = ""
+            if state.stage2_q is not None:
+                q_part = f"  Re(q)={state.stage2_q_re:.6f} Im(q)={state.stage2_q_im:.6f}"
             s2_txt = small_font.render(
-                f"[Stage 1] (Stage 2 ready: Re(p)={state.stage2_p_re:.6f} Re(o)={state.stage2_o_re:.6f}, press T)",
+                f"[Stage 1] (Stage 2 ready:{o_part}{p_part}{q_part}, press T)",
                 True, (180, 220, 140),
             )
         else:
@@ -1220,15 +1237,59 @@ def draw_panel(screen, state, font, small_font):
                 True, (180, 220, 140),
             )
     else:
-        preset_label = f"{state.size_preset} ({state.bip39_words}w/{state.entropy_bits}b)"
+        preset_label = f"{state.size_preset} ({state.bip39_words} words /{state.entropy_bits} bits)"
         s2_txt = small_font.render(
-            f"[Stage 1] {preset_label}  (W to cycle)",
+            f"[Stage 1] {preset_label}  (press W to cycle)",
             True, (180, 180, 180),
         )
     screen.blit(s2_txt, (x, y + 2))
 
-    # Debug row: manual hex perturbation inputs + "Go" button
+    # Debug row: manual hex perturbation inputs + "Go" button.
+    # Rows are rendered in alphabetic order: o (orbit seed), p (additive),
+    # q (linear).  The "Go" button sits at the end of the last (q) row.
     if state.debug_mode:
+        # o (orbit seed) hex fields
+        y += 22
+        sx = x
+        lbl_o = small_font.render("o hex  Re:", True, (150, 150, 170))
+        screen.blit(lbl_o, (sx, y + 2))
+        sx += lbl_o.get_width() + 4
+
+        o_re_fw = small_font.size("0" * DEBUG_HEX_FIELD_CHARS)[0] + 10
+        o_re_rect = pygame.Rect(sx, y, o_re_fw, 20)
+        o_re_border = (100, 180, 255) if state.debug_o_re_focused else (80, 80, 100)
+        pygame.draw.rect(screen, (20, 20, 30), o_re_rect)
+        pygame.draw.rect(screen, o_re_border, o_re_rect, 1)
+        o_re_txt = small_font.render(state.debug_o_re_hex, True, (220, 220, 240))
+        screen.blit(o_re_txt, (sx + 4, y + 2))
+        if state.debug_o_re_focused:
+            blink = (pygame.time.get_ticks() // CURSOR_BLINK_MS) % 2 == 0
+            if blink:
+                cx = sx + 4 + small_font.size(state.debug_o_re_hex[:state.debug_o_re_cursor])[0]
+                pygame.draw.line(screen, (220, 220, 240), (cx, y + 2), (cx, y + 16), 1)
+        state._debug_o_re_rect = o_re_rect
+        sx += o_re_fw + 8
+
+        lbl_o2 = small_font.render("Im:", True, (150, 150, 170))
+        screen.blit(lbl_o2, (sx, y + 2))
+        sx += lbl_o2.get_width() + 4
+
+        o_im_fw = small_font.size("0" * DEBUG_HEX_FIELD_CHARS)[0] + 10
+        o_im_rect = pygame.Rect(sx, y, o_im_fw, 20)
+        o_im_border = (100, 180, 255) if state.debug_o_im_focused else (80, 80, 100)
+        pygame.draw.rect(screen, (20, 20, 30), o_im_rect)
+        pygame.draw.rect(screen, o_im_border, o_im_rect, 1)
+        o_im_txt = small_font.render(state.debug_o_im_hex, True, (220, 220, 240))
+        screen.blit(o_im_txt, (sx + 4, y + 2))
+        if state.debug_o_im_focused:
+            blink = (pygame.time.get_ticks() // CURSOR_BLINK_MS) % 2 == 0
+            if blink:
+                cx = sx + 4 + small_font.size(state.debug_o_im_hex[:state.debug_o_im_cursor])[0]
+                pygame.draw.line(screen, (220, 220, 240), (cx, y + 2), (cx, y + 16), 1)
+        state._debug_o_im_rect = o_im_rect
+        sx += o_im_fw + 8
+
+        # p (additive perturbation) hex fields
         y += 22
         sx = x
         lbl = small_font.render("p hex  Re:", True, (150, 150, 170))
@@ -1271,7 +1332,7 @@ def draw_panel(screen, state, font, small_font):
         state._debug_p_im_rect = im_rect
         sx += im_fw + 8
 
-        # q (linear perturbation) hex fields on next row
+        # q (linear perturbation) hex fields
         y += 22
         sx = x
         lbl_q = small_font.render("q hex  Re:", True, (150, 150, 170))
@@ -1312,48 +1373,7 @@ def draw_panel(screen, state, font, small_font):
         state._debug_q_im_rect = q_im_rect
         sx += q_im_fw + 8
 
-        # o (orbit seed) hex fields on next row
-        y += 22
-        sx = x
-        lbl_o = small_font.render("o hex  Re:", True, (150, 150, 170))
-        screen.blit(lbl_o, (sx, y + 2))
-        sx += lbl_o.get_width() + 4
-
-        o_re_fw = small_font.size("0" * DEBUG_HEX_FIELD_CHARS)[0] + 10
-        o_re_rect = pygame.Rect(sx, y, o_re_fw, 20)
-        o_re_border = (100, 180, 255) if state.debug_o_re_focused else (80, 80, 100)
-        pygame.draw.rect(screen, (20, 20, 30), o_re_rect)
-        pygame.draw.rect(screen, o_re_border, o_re_rect, 1)
-        o_re_txt = small_font.render(state.debug_o_re_hex, True, (220, 220, 240))
-        screen.blit(o_re_txt, (sx + 4, y + 2))
-        if state.debug_o_re_focused:
-            blink = (pygame.time.get_ticks() // CURSOR_BLINK_MS) % 2 == 0
-            if blink:
-                cx = sx + 4 + small_font.size(state.debug_o_re_hex[:state.debug_o_re_cursor])[0]
-                pygame.draw.line(screen, (220, 220, 240), (cx, y + 2), (cx, y + 16), 1)
-        state._debug_o_re_rect = o_re_rect
-        sx += o_re_fw + 8
-
-        lbl_o2 = small_font.render("Im:", True, (150, 150, 170))
-        screen.blit(lbl_o2, (sx, y + 2))
-        sx += lbl_o2.get_width() + 4
-
-        o_im_fw = small_font.size("0" * DEBUG_HEX_FIELD_CHARS)[0] + 10
-        o_im_rect = pygame.Rect(sx, y, o_im_fw, 20)
-        o_im_border = (100, 180, 255) if state.debug_o_im_focused else (80, 80, 100)
-        pygame.draw.rect(screen, (20, 20, 30), o_im_rect)
-        pygame.draw.rect(screen, o_im_border, o_im_rect, 1)
-        o_im_txt = small_font.render(state.debug_o_im_hex, True, (220, 220, 240))
-        screen.blit(o_im_txt, (sx + 4, y + 2))
-        if state.debug_o_im_focused:
-            blink = (pygame.time.get_ticks() // CURSOR_BLINK_MS) % 2 == 0
-            if blink:
-                cx = sx + 4 + small_font.size(state.debug_o_im_hex[:state.debug_o_im_cursor])[0]
-                pygame.draw.line(screen, (220, 220, 240), (cx, y + 2), (cx, y + 16), 1)
-        state._debug_o_im_rect = o_im_rect
-        sx += o_im_fw + 8
-
-        # "Go" button — apply manual hex p,q and switch to stage 2
+        # "Go" button — apply manual hex o,p,q and switch to stage 2
         go_btn = pygame.Rect(sx, y, 36, 20)
         pygame.draw.rect(screen, (50, 90, 130), go_btn)
         pygame.draw.rect(screen, (180, 220, 255), go_btn, 1)
@@ -1731,7 +1751,7 @@ def main():
                         state.size_preset = SIZE_PRESET_ORDER[(idx + 1) % len(SIZE_PRESET_ORDER)]
                         state.status_msg = (f"Size: {state.size_preset} "
                             f"({state.bip39_words} words, {state.entropy_bits} bits, "
-                            f"{state.points_per_stage} pts/stage)")
+                            f"{state.points_per_stage} points/stage)")
                         state.status_color = CLR_NEUTRAL
                     elif event.key == pygame.K_s:
                         state.select_mode = not state.select_mode
@@ -1750,8 +1770,14 @@ def main():
                         if state.stage == 1 and state.stage2_p is not None:
                             state.stage = 2
                             if state.debug_mode:
-                                state.status_msg = (f"Stage 2  Re(p)={state.stage2_p_re:.6f} Im(p)={state.stage2_p_im:.6f}"
-                                                    f"  Re(o)={state.stage2_o_re:.6f} Im(o)={state.stage2_o_im:.6f}")
+                                q_msg = ""
+                                if state.stage2_q is not None:
+                                    q_msg = f"  Re(q)={state.stage2_q_re:.6f} Im(q)={state.stage2_q_im:.6f}"
+                                state.status_msg = (
+                                    f"Stage 2  "
+                                    f"Re(o)={state.stage2_o_re:.6f} Im(o)={state.stage2_o_im:.6f}"
+                                    f"  Re(p)={state.stage2_p_re:.6f} Im(p)={state.stage2_p_im:.6f}"
+                                    f"{q_msg}")
                             else:
                                 state.status_msg = "Stage 2"
                             state.status_color = CLR_STAGE_RDY
@@ -2143,6 +2169,13 @@ def main():
                     elif hasattr(state, '_debug_go_btn_rect') and state._debug_go_btn_rect.collidepoint(mx, my):
                         # Parse hex fields → build uint64 o, p, q → switch to stage 2
                         try:
+                            o_re_bits = int(state.debug_o_re_hex or "0", 16)
+                            o_im_bits = int(state.debug_o_im_hex or "0", 16)
+                            if o_re_bits < 0 or o_re_bits > 0xFFFFFFFF:
+                                raise ValueError("o Re out of range")
+                            if o_im_bits < 0 or o_im_bits > 0xFFFFFFFF:
+                                raise ValueError("o Im out of range")
+                            o = (o_im_bits << 32) | o_re_bits
                             p_re_bits = int(state.debug_p_re_hex or "0", 16)
                             p_im_bits = int(state.debug_p_im_hex or "0", 16)
                             if p_re_bits < 0 or p_re_bits > 0xFFFFFFFF:
@@ -2157,13 +2190,6 @@ def main():
                             if q_im_bits < 0 or q_im_bits > 0xFFFFFFFF:
                                 raise ValueError("q Im out of range")
                             q = (q_im_bits << 32) | q_re_bits
-                            o_re_bits = int(state.debug_o_re_hex or "0", 16)
-                            o_im_bits = int(state.debug_o_im_hex or "0", 16)
-                            if o_re_bits < 0 or o_re_bits > 0xFFFFFFFF:
-                                raise ValueError("o Re out of range")
-                            if o_im_bits < 0 or o_im_bits > 0xFFFFFFFF:
-                                raise ValueError("o Im out of range")
-                            o = (o_im_bits << 32) | o_re_bits
                             o_re, o_im = decode_o_display(o)
                             p_re, p_im = decode_p_display(p)
                             q_re, q_im = decode_q_display(q)

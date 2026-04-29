@@ -149,8 +149,9 @@ def run_argon2_iterative(state, gui_iterations):
             label = "identity" if gui_iterations == 0 else f"x{gui_iterations}"
             if state.debug_mode:
                 state.status_msg = (f"Argon2d {profile_label} ({label}) → Stage 2  "
+                                    f"Re(o)={state.stage2_o_re:.6f} Im(o)={state.stage2_o_im:.6f}  "
                                     f"Re(p)={state.stage2_p_re:.6f} Im(p)={state.stage2_p_im:.6f}  "
-                                    f"Re(o)={state.stage2_o_re:.6f} Im(o)={state.stage2_o_im:.6f}")
+                                    f"Re(q)={state.stage2_q_re:.6f} Im(q)={state.stage2_q_im:.6f}")
             else:
                 state.status_msg = f"Argon2d {profile_label} ({label}) → Stage 2"
             state.status_color = CLR_SUCCESS
@@ -184,7 +185,7 @@ def derive_stage2_params(argon2_digest):
 
 
 def decode_o_display(o):
-    """Decode orbit seed o into (Re, Im) floats for display (no baseline)."""
+    """Decode orbit-seed entropy reservoir o into (Re(o), Im(o)) floats — no baseline."""
     mag_re = sum((1 if (o & (1 << j)) else 0) * 2.0**(-(O_MAGNITUDE_MIN_EXP + j))
                  for j in range(O_MAGNITUDE_BITS))
     mag_im = sum((1 if (o & (1 << (j + 32))) else 0) * 2.0**(-(O_MAGNITUDE_MIN_EXP + j))
@@ -195,7 +196,8 @@ def decode_o_display(o):
 
 
 def decode_p_display(p):
-    """Decode additive perturbation p into (Re, Im) floats for display."""
+    """Decode additive-perturbation entropy reservoir p into (Re(p), Im(p)) floats —
+    baseline 2^{-P_BASELINE_EXP} steers p away from the canonical-formula tail."""
     baseline = 2.0 ** (-P_BASELINE_EXP)
     mag_re = sum((1 if (p & (1 << j)) else 0) * 2.0**(-(P_MAGNITUDE_MIN_EXP + j))
                  for j in range(P_MAGNITUDE_BITS))
@@ -209,7 +211,7 @@ def decode_p_display(p):
 
 
 def decode_q_display(q):
-    """Decode linear perturbation q into (Re, Im) floats for display (no baseline)."""
+    """Decode linear-perturbation entropy reservoir q into (Re(q), Im(q)) floats — no baseline."""
     mag_re = sum((1 if (q & (1 << j)) else 0) * 2.0**(-(Q_MAGNITUDE_MIN_EXP + j))
                  for j in range(Q_MAGNITUDE_BITS))
     mag_im = sum((1 if (q & (1 << (j + 32))) else 0) * 2.0**(-(Q_MAGNITUDE_MIN_EXP + j))
