@@ -232,7 +232,19 @@ Points auto-commit at 32 bits and advance to the next point.
 Press `S` to enter selection mode, then click points on the fractal.
 Each clicked point is validated through the full bisection with
 contraction — points that fall in contracted-away dead zones are
-rejected with a status bar message. Valid points are decoded to bits.
+rejected with a status bar message.
+
+Selection is **slot-based**: each click fills the *active slot*
+(highlighted with a `←` next to its marker), and the active slot then
+advances to the next still-empty slot. This means a wrong click is not
+punitive — you can:
+
+- Press `N` to cycle the active slot freely between any of the
+  `points_per_stage` slots in the current stage, and
+- Click again on a slot you already filled to **overwrite** it.
+
+Once every slot in the stage holds a valid point, the bits are decoded
+automatically and select mode exits.
 
 ### Salt & SHA512
 

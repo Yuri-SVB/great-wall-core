@@ -152,12 +152,17 @@ class ViewerState:
 
         # Select-points mode
         self.select_mode = False
+        # During select_mode, selected_points / stage2_selected_points are
+        # padded with None for unfilled slots so the user can cycle (N) and
+        # overwrite any slot.  Outside select_mode they are flat lists of
+        # valid tuples (no None) once a stage has been fully decoded.
         self.selected_points = []  # stage-1: list of (re_raw, im_raw) tuples
         self.selected_steps = []   # list of step-data lists, one per decoded point
         self.selected_final_rects = []  # list of Rect, one per decoded point
         self.stage2_selected_points = []  # stage-2: list of (re_raw, im_raw) tuples
         self.stage2_selected_steps = []
         self.stage2_selected_final_rects = []
+        self.select_active_idx = 0  # which slot the next click overwrites
         self.decoded_mnemonic = ""
         self.decoded_stage1_bits = None  # 64 bits from stage-1 decode (for Argon2)
         self.decoded_stage2_bits = None  # 64 bits from stage-2 decode
@@ -1013,9 +1018,10 @@ def draw_panel(screen, state, font, small_font):
     pygame.draw.rect(screen, (200, 100, 100) if state.select_mode else (70, 70, 90), sel_rect, 1)
     if state.select_mode:
         if state.stage == 2:
-            sel_label = f"Select {len(state.stage2_selected_points)}/{state.points_per_stage}"
+            n_filled = sum(1 for p in state.stage2_selected_points if p is not None)
         else:
-            sel_label = f"Select {len(state.selected_points)}/{state.points_per_stage}"
+            n_filled = sum(1 for p in state.selected_points if p is not None)
+        sel_label = f"Select {n_filled}/{state.points_per_stage}"
     else:
         sel_label = "Select Pts"
     sel_txt = small_font.render(
@@ -1689,16 +1695,34 @@ def main():
                         state.stage2_encoded_final_rects = []
                         state.selected_point_idx = None
                         state.selected_decoded_idx = None
-                        state.selected_points = []
+                        if state.select_mode:
+                            # Keep slot-based padding so clicks still target slots.
+                            state.selected_points = [None] * state.points_per_stage
+                            state.stage2_selected_points = [None] * state.points_per_stage
+                            state.select_active_idx = 0
+                        else:
+                            state.selected_points = []
+                            state.stage2_selected_points = []
                         state.decoded_mnemonic = ""
                         state.highlighted_leaf_rect = None
                         state.needs_repalette = True
                         state.status_msg = "Cleared"
                         state.status_color = CLR_NEUTRAL
                     elif event.key == pygame.K_n:
-                        # Next point (encoded then selected)
+                        # In select mode: cycle which slot the next click fills.
+                        if state.select_mode and state.points_per_stage > 0:
+                            state.select_active_idx = (
+                                (state.select_active_idx + 1) % state.points_per_stage)
+                            stage_lbl = "stage 2" if state.stage == 2 else "stage 1"
+                            state.status_msg = (
+                                f"Click slot {state.select_active_idx + 1}/"
+                                f"{state.points_per_stage} ({stage_lbl}). "
+                                f"N=cycle slot, click=set/overwrite.")
+                            state.status_color = CLR_WARNING
+                            continue
+                        # Otherwise: cycle through encoded then decoded markers.
                         n_enc = len(state.encoded_points)
-                        n_sel = len(state.selected_points)
+                        n_sel = sum(1 for p in state.selected_points if p is not None)
                         if n_enc + n_sel > 0:
                             if state.selected_point_idx is not None:
                                 nxt = state.selected_point_idx + 1
@@ -1757,12 +1781,17 @@ def main():
                     elif event.key == pygame.K_s:
                         state.select_mode = not state.select_mode
                         if state.select_mode:
+                            state.select_active_idx = 0
                             if state.stage == 2:
-                                state.stage2_selected_points = []
-                                state.status_msg = f"Click {state.points_per_stage} points to decode (stage 2)"
+                                state.stage2_selected_points = [None] * state.points_per_stage
+                                state.status_msg = (
+                                    f"Click slot 1/{state.points_per_stage} (stage 2). "
+                                    f"N=cycle slot, click=set/overwrite.")
                             else:
-                                state.selected_points = []
-                                state.status_msg = f"Click {state.points_per_stage} points to decode (stage 1)"
+                                state.selected_points = [None] * state.points_per_stage
+                                state.status_msg = (
+                                    f"Click slot 1/{state.points_per_stage} (stage 1). "
+                                    f"N=cycle slot, click=set/overwrite.")
                             state.status_color = CLR_WARNING
                         else:
                             state.status_msg = "Select mode off"
@@ -2081,12 +2110,17 @@ def main():
                     elif hasattr(state, '_select_btn_rect') and state._select_btn_rect.collidepoint(mx, my):
                         state.select_mode = not state.select_mode
                         if state.select_mode:
+                            state.select_active_idx = 0
                             if state.stage == 2:
-                                state.stage2_selected_points = []
-                                state.status_msg = f"Click {state.points_per_stage} points to decode (stage 2)"
+                                state.stage2_selected_points = [None] * state.points_per_stage
+                                state.status_msg = (
+                                    f"Click slot 1/{state.points_per_stage} (stage 2). "
+                                    f"N=cycle slot, click=set/overwrite.")
                             else:
-                                state.selected_points = []
-                                state.status_msg = f"Click {state.points_per_stage} points to decode (stage 1)"
+                                state.selected_points = [None] * state.points_per_stage
+                                state.status_msg = (
+                                    f"Click slot 1/{state.points_per_stage} (stage 1). "
+                                    f"N=cycle slot, click=set/overwrite.")
                             state.status_color = CLR_WARNING
                         else:
                             state.status_msg = "Select mode off"
@@ -2102,10 +2136,15 @@ def main():
                         state.stage2_encoded_final_rects = []
                         state.selected_point_idx = None
                         state.selected_decoded_idx = None
-                        state.selected_points = []
+                        if state.select_mode:
+                            state.selected_points = [None] * state.points_per_stage
+                            state.stage2_selected_points = [None] * state.points_per_stage
+                            state.select_active_idx = 0
+                        else:
+                            state.selected_points = []
+                            state.stage2_selected_points = []
                         state.selected_steps = []
                         state.selected_final_rects = []
-                        state.stage2_selected_points = []
                         state.stage2_selected_steps = []
                         state.stage2_selected_final_rects = []
                         state.decoded_mnemonic = ""
@@ -2317,7 +2356,10 @@ def main():
                     if state.selected_points and not state.select_mode:
                         best_dist = POINT_CLICK_THRESHOLD_PX
                         best_idx = None
-                        for i, (re_raw, im_raw) in enumerate(state.selected_points):
+                        for i, p in enumerate(state.selected_points):
+                            if p is None:
+                                continue
+                            re_raw, im_raw = p
                             sx, sy = state.complex_to_screen(fixed_to_f64(re_raw), fixed_to_f64(im_raw))
                             dist = math.hypot(mx - sx, my - sy)
                             if dist < best_dist:
@@ -2330,8 +2372,8 @@ def main():
                             state.status_color = MARKER_COLORS[best_idx % len(MARKER_COLORS)]
                             continue
 
-                    if state.select_mode and state.stage == 1 and len(state.selected_points) < state.points_per_stage:
-                        # --- Stage-1 select-points flow ---
+                    if state.select_mode and state.stage == 1:
+                        # --- Stage-1 select-points flow (slot-based) ---
                         re_raw, im_raw = state.screen_to_complex_fixed(mx, my)
                         re = fixed_to_f64(re_raw)
                         im = fixed_to_f64(im_raw)
@@ -2352,18 +2394,37 @@ def main():
                             state.highlighted_leaf_rect = None
                             state.needs_repalette = True
                             if state.status_color != CLR_ERROR:
-                                state.status_msg = f"Bad point at ({re:.6f}, {im:.6f}) — excluded by contraction"
+                                state.status_msg = (
+                                    f"Bad point at ({re:.6f}, {im:.6f}) — "
+                                    f"excluded by contraction. Slot {state.select_active_idx + 1} "
+                                    f"unchanged; click again or press N to cycle.")
                                 state.status_color = CLR_ERROR
                         else:
-                            state.selected_points.append((re_raw, im_raw))
-                            idx = len(state.selected_points)
-                            state.status_msg = f"Point {idx}/{state.points_per_stage} selected at ({re:.6f}, {im:.6f})"
+                            slot = state.select_active_idx
+                            state.selected_points[slot] = (re_raw, im_raw)
+                            # Advance to the next still-empty slot (cyclic), so
+                            # users don't have to press N after every fresh click.
+                            for off in range(1, state.points_per_stage + 1):
+                                cand = (slot + off) % state.points_per_stage
+                                if state.selected_points[cand] is None:
+                                    state.select_active_idx = cand
+                                    break
+                            else:
+                                # All slots filled — leave active_idx at slot
+                                # (auto-decode below will exit select_mode).
+                                pass
+                            n_filled = sum(1 for p in state.selected_points if p is not None)
+                            state.status_msg = (
+                                f"Slot {slot + 1} set ({n_filled}/{state.points_per_stage} filled) "
+                                f"at ({re:.6f}, {im:.6f}). N=cycle, click=overwrite.")
                             state.status_color = CLR_WARNING
                             state.highlighted_leaf_rect = leaf_rect
                             state.needs_repalette = True
 
-                        if len(state.selected_points) == state.points_per_stage:
+                        if all(p is not None for p in state.selected_points) \
+                                and len(state.selected_points) == state.points_per_stage:
                             try:
+                                state.selected_points = list(state.selected_points)
                                 stage1_bits, s1_steps, s1_rects = decode_points(
                                     state.selected_points, p=STAGE1_P)
                                 state.decoded_stage1_bits = stage1_bits
@@ -2381,8 +2442,8 @@ def main():
                                 state.status_color = CLR_ERROR
                                 state.select_mode = False
 
-                    elif state.select_mode and state.stage == 2 and len(state.stage2_selected_points) < state.points_per_stage:
-                        # --- Stage-2 select-points flow ---
+                    elif state.select_mode and state.stage == 2:
+                        # --- Stage-2 select-points flow (slot-based) ---
                         re_raw, im_raw = state.screen_to_complex_fixed(mx, my)
                         re = fixed_to_f64(re_raw)
                         im = fixed_to_f64(im_raw)
@@ -2403,17 +2464,31 @@ def main():
                             state.highlighted_leaf_rect = None
                             state.needs_repalette = True
                             if state.status_color != CLR_ERROR:
-                                state.status_msg = f"Bad point at ({re:.6f}, {im:.6f}) — excluded by contraction"
+                                state.status_msg = (
+                                    f"Bad point at ({re:.6f}, {im:.6f}) — "
+                                    f"excluded by contraction. Slot {state.select_active_idx + 1} "
+                                    f"unchanged; click again or press N to cycle.")
                                 state.status_color = CLR_ERROR
                         else:
-                            state.stage2_selected_points.append((re_raw, im_raw))
-                            idx = len(state.stage2_selected_points)
-                            state.status_msg = f"Point {idx}/{state.points_per_stage} selected at ({re:.6f}, {im:.6f}) (stage 2)"
+                            slot = state.select_active_idx
+                            state.stage2_selected_points[slot] = (re_raw, im_raw)
+                            for off in range(1, state.points_per_stage + 1):
+                                cand = (slot + off) % state.points_per_stage
+                                if state.stage2_selected_points[cand] is None:
+                                    state.select_active_idx = cand
+                                    break
+                            else:
+                                pass
+                            n_filled = sum(1 for p in state.stage2_selected_points if p is not None)
+                            state.status_msg = (
+                                f"Slot {slot + 1} set ({n_filled}/{state.points_per_stage} filled) "
+                                f"at ({re:.6f}, {im:.6f}) (stage 2). N=cycle, click=overwrite.")
                             state.status_color = CLR_WARNING
                             state.highlighted_leaf_rect = leaf_rect
                             state.needs_repalette = True
 
-                        if len(state.stage2_selected_points) == state.points_per_stage:
+                        if all(p is not None for p in state.stage2_selected_points) \
+                                and len(state.stage2_selected_points) == state.points_per_stage:
                             try:
                                 stage2_bits, s2_steps, s2_rects = decode_points(
                                     state.stage2_selected_points, o=state.stage2_o, p=state.stage2_p, q=state.stage2_q)
@@ -2534,23 +2609,34 @@ def main():
                 label = f"P{i + 1 + point_offset}" + (" *" if selected else "")
                 draw_marker(screen, sx, sy, color, label, small_font)
 
-        # Draw selected points (stage 1 and stage 2)
-        for i, (re_raw, im_raw) in enumerate(state.selected_points):
+        # Draw selected points (stage 1 and stage 2).  In select mode the
+        # lists may contain None for unfilled slots — skip those.
+        for i, p in enumerate(state.selected_points):
+            if p is None:
+                continue
+            re_raw, im_raw = p
             re = fixed_to_f64(re_raw)
             im = fixed_to_f64(im_raw)
             sx, sy = state.complex_to_screen(re, im)
             if 0 <= sx < state.vp_w and 0 <= sy < state.vp_h:
                 color = MARKER_COLORS[i % len(MARKER_COLORS)]
                 selected = (i == state.selected_decoded_idx)
-                label = f"S{i+1}" + (" *" if selected else "")
+                active_slot = (state.select_mode and state.stage == 1
+                               and i == state.select_active_idx)
+                label = f"S{i+1}" + (" *" if selected else "") + (" ←" if active_slot else "")
                 draw_marker(screen, sx, sy, color, label, small_font)
-        for i, (re_raw, im_raw) in enumerate(state.stage2_selected_points):
+        for i, p in enumerate(state.stage2_selected_points):
+            if p is None:
+                continue
+            re_raw, im_raw = p
             re = fixed_to_f64(re_raw)
             im = fixed_to_f64(im_raw)
             sx, sy = state.complex_to_screen(re, im)
             if 0 <= sx < state.vp_w and 0 <= sy < state.vp_h:
                 color = MARKER_COLORS[(i + state.points_per_stage) % len(MARKER_COLORS)]
-                label = f"S{i + 1 + state.points_per_stage}"
+                active_slot = (state.select_mode and state.stage == 2
+                               and i == state.select_active_idx)
+                label = f"S{i + 1 + state.points_per_stage}" + (" ←" if active_slot else "")
                 draw_marker(screen, sx, sy, color, label, small_font)
 
         # Draw panel
