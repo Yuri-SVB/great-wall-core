@@ -1821,10 +1821,28 @@ def main():
                             state.status_msg = "Stage 2 unavailable (run Argon2 first)"
                             state.status_color = CLR_WARNING
                     elif event.key == pygame.K_v:
-                        state.show_areas = not state.show_areas
-                        state.area_focus_step = None
-                        label = "ON" if state.show_areas else "OFF"
-                        state.status_msg = f"Area visualization {label}"
+                        # V is the universal "show / hide all area rectangles"
+                        # toggle.  Areas are drawn whenever ANY of show_areas,
+                        # selected_point_idx, or selected_decoded_idx is set —
+                        # so a click on a P/S marker (which sets one of the
+                        # idx fields) used to leave area rectangles visible
+                        # even after V was pressed to "turn them off". Make V
+                        # truly reversible: if anything is currently driving
+                        # the area display, clear all sources; otherwise turn
+                        # show_areas on.
+                        any_on = (state.show_areas
+                                  or state.selected_point_idx is not None
+                                  or state.selected_decoded_idx is not None)
+                        if any_on:
+                            state.show_areas = False
+                            state.selected_point_idx = None
+                            state.selected_decoded_idx = None
+                            state.area_focus_step = None
+                            state.status_msg = "Area visualization OFF"
+                        else:
+                            state.show_areas = True
+                            state.area_focus_step = None
+                            state.status_msg = "Area visualization ON"
                         state.status_color = CLR_NEUTRAL
                     elif event.key == pygame.K_m:
                         state.manual_bits_mode = not state.manual_bits_mode
