@@ -76,6 +76,21 @@ def _load_checkpoint(path):
 # Iterative Argon2 hashing (background thread)
 # ---------------------------------------------------------------------------
 
+class _Argon2Stopped(Exception):
+    """Raised in the worker thread when state.argon2_stop_requested goes True."""
+
+
+def _check_argon2_stop(state):
+    """Raise _Argon2Stopped if the main thread requested cancellation.
+
+    Stop granularity is one Argon2d iteration: the in-flight Rust call is not
+    interruptible, so this is checked between iterations.
+    """
+    if getattr(state, "argon2_stop_requested", False):
+        state.argon2_stop_requested = False
+        raise _Argon2Stopped()
+
+
 def run_argon2_iterative(state, gui_iterations):
     """Run iterative Argon2d in a background thread, updating state.argon2_progress.
 
@@ -96,6 +111,7 @@ def run_argon2_iterative(state, gui_iterations):
     stage1_bits = state.argon2_stage1_bits
     profile = state.argon2_profile
     save_intermediate = getattr(state, "argon2_save_intermediate", False)
+    state.argon2_stop_requested = False
 
     def _worker():
         try:
@@ -120,6 +136,7 @@ def run_argon2_iterative(state, gui_iterations):
                     _save_checkpoint(ckpt_path, 1, digest)
                     state.argon2_progress = 1
                     resume_it = 1
+                    _check_argon2_stop(state)
                 else:
                     state.argon2_progress = resume_it
 
@@ -128,12 +145,15 @@ def run_argon2_iterative(state, gui_iterations):
                     cur_it = i + 1
                     _save_checkpoint(ckpt_path, cur_it, digest)
                     state.argon2_progress = cur_it
+                    _check_argon2_stop(state)
             else:
                 digest = argon2_single(data, profile)
                 state.argon2_progress = 1
+                _check_argon2_stop(state)
                 for i in range(1, gui_iterations):
                     digest = argon2_single(digest, profile)
                     state.argon2_progress = i + 1
+                    _check_argon2_stop(state)
 
             state.argon2_digest = digest.hex()
             state.stage2_o, state.stage2_o_re, state.stage2_o_im, \
@@ -155,6 +175,11 @@ def run_argon2_iterative(state, gui_iterations):
             else:
                 state.status_msg = f"Argon2d {profile_label} ({label}) → Stage 2"
             state.status_color = CLR_SUCCESS
+        except _Argon2Stopped:
+            state.argon2_digest = ""
+            state.status_msg = (f"Argon2 stopped at iteration "
+                                f"{state.argon2_progress}/{gui_iterations}")
+            state.status_color = CLR_WARNING
         except Exception as e:
             state.argon2_digest = ""
             state.status_msg = f"Argon2 error: {e}"
@@ -240,6 +265,7 @@ def run_random_encode(state):
         iters = 0
 
     state.argon2_running = True
+    state.argon2_stop_requested = False
     state.argon2_progress = 0
     state.argon2_progress_total = max(iters, 1)
     prof_label = {PROFILE_BASIC: "Basic", PROFILE_ADVANCED: "Advanced",
@@ -291,18 +317,22 @@ def run_random_encode(state):
                     _save_checkpoint(ckpt_path, 1, digest)
                     state.argon2_progress = 1
                     resume_it = 1
+                    _check_argon2_stop(state)
                 else:
                     state.argon2_progress = resume_it
                 for i in range(resume_it, iters):
                     digest = argon2_single(digest, profile)
                     _save_checkpoint(ckpt_path, i + 1, digest)
                     state.argon2_progress = i + 1
+                    _check_argon2_stop(state)
             else:
                 digest = argon2_single(data, profile)
                 state.argon2_progress = 1
+                _check_argon2_stop(state)
                 for i in range(1, iters):
                     digest = argon2_single(digest, profile)
                     state.argon2_progress = i + 1
+                    _check_argon2_stop(state)
 
             state.argon2_digest = digest.hex()
             o, o_re, o_im, p, p_re, p_im, q, q_re, q_im = derive_stage2_params(digest)
@@ -339,6 +369,10 @@ def run_random_encode(state):
             state.selected_decoded_idx = None
             state.status_msg = f"F2: {mnemonic[:40]}..."
             state.status_color = CLR_SUCCESS
+        except _Argon2Stopped:
+            state.status_msg = (f"F2 stopped at iteration "
+                                f"{state.argon2_progress}/{iters}")
+            state.status_color = CLR_WARNING
         except Exception as e:
             state.status_msg = f"F2 error: {e}"
             state.status_color = CLR_ERROR

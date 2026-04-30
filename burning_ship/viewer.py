@@ -219,6 +219,7 @@ class ViewerState:
         self.argon2_iter_cursor = 4        # cursor position in iterations field
         self.argon2_digest = ""            # hex digest result
         self.argon2_running = False        # True while hash is computing
+        self.argon2_stop_requested = False # set by main thread; worker exits at next iteration boundary
         self.argon2_progress = 0           # completed iterations so far
         self.argon2_progress_total = 0     # total iterations requested
         self.argon2_stage1_bits = None     # cached 64-bit list from encode/decode
@@ -2078,7 +2079,19 @@ def main():
                                 state.status_msg = "Profile: Basic (1 GiB, p=2, mobile)"
                             state.status_color = CLR_PENDING
                     elif hasattr(state, '_argon2_hash_btn_rect') and state._argon2_hash_btn_rect.collidepoint(mx, my):
-                        if state.argon2_stage1_bits and not state.argon2_running:
+                        if state.argon2_running:
+                            # Click on "Stop": ask the worker to bail out at the
+                            # next iteration boundary.  Mid-iteration Rust calls
+                            # are not interruptible, so the actual exit may take
+                            # up to one Argon2d pass to take effect.
+                            if not state.argon2_stop_requested:
+                                state.argon2_stop_requested = True
+                                state.status_msg = (
+                                    f"Argon2 stop requested — finishing current "
+                                    f"iteration ({state.argon2_progress}/"
+                                    f"{state.argon2_progress_total})...")
+                                state.status_color = CLR_PENDING
+                        elif state.argon2_stage1_bits:
                             try:
                                 iters = int(state.argon2_iterations)
                                 if iters < 0:
@@ -2096,7 +2109,7 @@ def main():
                             state.status_msg = f"Argon2d running ({label})..."
                             state.status_color = CLR_PENDING
                             run_argon2_iterative(state, iters)
-                        elif not state.argon2_stage1_bits:
+                        else:
                             state.status_msg = "Encode first to get stage-1 bits"
                             state.status_color = CLR_WARNING
                     elif hasattr(state, '_argon2_iter_rect') and state._argon2_iter_rect.collidepoint(mx, my):
