@@ -1775,6 +1775,17 @@ def main():
                         # Cycle size preset: mini → default → large → mini
                         idx = SIZE_PRESET_ORDER.index(state.size_preset)
                         state.size_preset = SIZE_PRESET_ORDER[(idx + 1) % len(SIZE_PRESET_ORDER)]
+                        if state.select_mode:
+                            # points_per_stage just changed; resize the
+                            # in-progress slot list to match the new size and
+                            # restart from slot 0. Otherwise select_active_idx
+                            # can outrun the stale list length and the next
+                            # click crashes with IndexError on the write.
+                            if state.stage == 2:
+                                state.stage2_selected_points = [None] * state.points_per_stage
+                            else:
+                                state.selected_points = [None] * state.points_per_stage
+                            state.select_active_idx = 0
                         state.status_msg = (f"Size: {state.size_preset} "
                             f"({state.bip39_words} words, {state.entropy_bits} bits, "
                             f"{state.points_per_stage} points/stage)")
@@ -2405,6 +2416,15 @@ def main():
 
                     if state.select_mode and state.stage == 1:
                         # --- Stage-1 select-points flow (slot-based) ---
+                        # Defensive resync: if anything (a stale code path, a
+                        # session load, an unusual key sequence) left the slot
+                        # list out of sync with points_per_stage, snap back to
+                        # a fresh padded list rather than crashing on indexing.
+                        if len(state.selected_points) != state.points_per_stage:
+                            state.selected_points = [None] * state.points_per_stage
+                            state.select_active_idx = 0
+                        elif not (0 <= state.select_active_idx < state.points_per_stage):
+                            state.select_active_idx = 0
                         re_raw, im_raw = state.screen_to_complex_fixed(mx, my)
                         re = fixed_to_f64(re_raw)
                         im = fixed_to_f64(im_raw)
@@ -2475,6 +2495,12 @@ def main():
 
                     elif state.select_mode and state.stage == 2:
                         # --- Stage-2 select-points flow (slot-based) ---
+                        # Same defensive resync as in the stage-1 branch.
+                        if len(state.stage2_selected_points) != state.points_per_stage:
+                            state.stage2_selected_points = [None] * state.points_per_stage
+                            state.select_active_idx = 0
+                        elif not (0 <= state.select_active_idx < state.points_per_stage):
+                            state.select_active_idx = 0
                         re_raw, im_raw = state.screen_to_complex_fixed(mx, my)
                         re = fixed_to_f64(re_raw)
                         im = fixed_to_f64(im_raw)
