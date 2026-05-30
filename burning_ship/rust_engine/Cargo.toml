@@ -9,7 +9,11 @@ verbose = []
 
 [lib]
 name = "burning_ship_engine"
-crate-type = ["cdylib"]
+# rlib added alongside cdylib so great-wall-ux's `great_wall_core_ffi` wrapper
+# can link the escape-count kernel directly (Rust-to-Rust). cdylib alone cannot
+# be used as a Cargo dependency. Adding rlib is output-neutral for existing
+# cdylib consumers (the Python bridge keeps using the cdylib).
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 rayon = "1.10"
