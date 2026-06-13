@@ -54,13 +54,22 @@ def run_encode(vector_doc):
     return json.loads(result.stdout)
 
 
-def run_decode(vector_path):
-    """Run cli.py decode on a vector file."""
+def run_decode(vector_path, timeout=1800):
+    """Run cli.py decode on a vector file.
+
+    ``timeout`` is bounded low for the negative/meta tests: decoding a corrupted
+    document can land in a barren region and exhaust island-discovery attempts,
+    so a timeout there is itself valid evidence that the corruption was caught.
+    """
     cmd = [sys.executable, CLI_PATH, "decode", "--input", vector_path]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     if result.returncode != 0:
         raise RuntimeError(f"cli.py decode failed: {result.stderr}")
     return json.loads(result.stdout)
+
+
+# Bounded timeout for the negative/meta decodes (a hang on garbage == detected).
+META_DECODE_TIMEOUT = 120
 
 
 def deep_diff(expected, actual, path=""):
@@ -203,11 +212,14 @@ def test_meta_bitflip(vectors_dir, verbose=False):
 
     original_hex = doc["input"]["entropy_hex"]
 
-    # Corrupt one leaf boundary (re_min, bit 30 — well inside the value)
+    # Corrupt one leaf boundary.  The decoded point is midpoint(re_min, re_max),
+    # so the flipped bit must be high enough to shift that midpoint OUT of the
+    # ~2^-15-wide leaf — bit 50 (2^-10 in I4F60) moves it by ~2^-11, well past a
+    # leaf, so it decodes to different bits (or a barren/rejected region).
     import copy
     corrupted = copy.deepcopy(doc)
     corrupted["stages"][0]["leaf"]["re_min"] = _flip_hex_bit(
-        corrupted["stages"][0]["leaf"]["re_min"], 30)
+        corrupted["stages"][0]["leaf"]["re_min"], 50)
 
     # Write to temp file and decode
     import tempfile
@@ -216,7 +228,7 @@ def test_meta_bitflip(vectors_dir, verbose=False):
         tf_path = tf.name
 
     try:
-        decoded = run_decode(tf_path)
+        decoded = run_decode(tf_path, timeout=META_DECODE_TIMEOUT)
         decoded_hex = decoded["decoded_entropy_hex"]
         if decoded_hex == original_hex:
             print(f"  FAIL  meta-bitflip: corrupted boundary decoded to same entropy!")
@@ -256,7 +268,7 @@ def test_meta_wrong_params(vectors_dir, verbose=False):
         tf_path = tf.name
 
     try:
-        decoded = run_decode(tf_path)
+        decoded = run_decode(tf_path, timeout=META_DECODE_TIMEOUT)
         decoded_hex = decoded["decoded_entropy_hex"]
         if decoded_hex == original_hex:
             print(f"  FAIL  meta-wrong-params: wrong params decoded to same entropy!")
@@ -303,7 +315,7 @@ def test_meta_cross_stage_swap(vectors_dir, verbose=False):
         tf_path = tf.name
 
     try:
-        decoded = run_decode(tf_path)
+        decoded = run_decode(tf_path, timeout=META_DECODE_TIMEOUT)
         decoded_hex = decoded["decoded_entropy_hex"]
         if decoded_hex == original_hex:
             print(f"  FAIL  meta-cross-swap: swapped stages decoded to same entropy!")
