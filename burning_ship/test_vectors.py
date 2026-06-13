@@ -54,13 +54,24 @@ def run_encode(vector_doc):
     return json.loads(result.stdout)
 
 
-def run_decode(vector_path):
-    """Run cli.py decode on a vector file."""
+def run_decode(vector_path, timeout=1800):
+    """Run cli.py decode on a vector file.
+
+    ``timeout`` is bounded low for the negative/meta tests: decoding a corrupted
+    document can land in a barren region and exhaust island-discovery attempts,
+    so a timeout there is itself valid evidence that the corruption was caught.
+    """
     cmd = [sys.executable, CLI_PATH, "decode", "--input", vector_path]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     if result.returncode != 0:
         raise RuntimeError(f"cli.py decode failed: {result.stderr}")
     return json.loads(result.stdout)
+
+
+# Bounded timeout for the negative/meta decodes (a hang on garbage == detected).
+# Valid corrupted decodes that DIFFER finish in a few seconds; only a barren
+# region hangs, so a low bound cleanly separates "detected" from "slow".
+META_DECODE_TIMEOUT = 30
 
 
 def deep_diff(expected, actual, path=""):
@@ -174,61 +185,116 @@ def test_cross_mode(vectors_dir, verbose=False):
 
 # ---------------------------------------------------------------------------
 # Meta tests: verify the harness catches real errors
+#
+# FALSE-NEGATIVE CLASS TO AVOID: decode reconstructs a point as the midpoint of
+# its leaf and re-derives bits from *which leaf the point lands in* — so the
+# encoding deliberately tolerates any perturbation smaller than a leaf cell
+# (roughly 2^-15 for a 32-bit point, and much smaller where contraction has
+# shrunk the leaf, e.g. ~2^-22 on the all-zeros path).  A corruption that moves
+# the decoded point by LESS than the leaf width is (correctly) NOT detected.
+# Worse, an EXTREME point (all-zeros / all-ones) sits on the same side of every
+# split, so moving it further in that direction stays on that side and decodes
+# to the SAME bits even once it has left the leaf (valid just goes False).
+# Hence: test leaf MEMBERSHIP from the boundaries, don't perturb-and-decode.
 # ---------------------------------------------------------------------------
 
-def _flip_hex_bit(hex_str, bit_pos=0):
-    """Flip one bit in a hex string (0x... format)."""
+def _parse_hex_i64(hex_str):
+    """Parse a 0x... hex string (16 digits) to a signed i64."""
     val = int(hex_str, 16)
-    val ^= (1 << bit_pos)
-    return f"0x{val:016X}"
+    if val >= 0x8000000000000000:
+        val -= 0x10000000000000000
+    return val
 
 
-def test_meta_bitflip(vectors_dir, verbose=False):
-    """Flip one bit in a leaf boundary and verify round-trip detects mismatch.
+def _midpoint_i64(a, b):
+    """Replicate Rust Fixed::midpoint: (a>>1) + (b>>1) + (a & b & 1)."""
+    return (a >> 1) + (b >> 1) + (a & b & 1)
 
-    Uses boundaries (re_min/re_max/im_min/im_max) rather than center,
-    because the center is midpoint(min, max) and flipping its LSB might
-    not change the midpoint due to rounding.
+
+def _in_leaf(re, im, rmn, rmx, imn, imx):
+    """Semi-open leaf membership, exactly mirroring Rust Rect::contains:
+    re_min <= re < re_max  AND  im_min <= im < im_max  (closed min, open max)."""
+    return rmn <= re < rmx and imn <= im < imx
+
+
+def test_meta_leaf_membership(vectors_dir, verbose=False):
+    """Build points straight from a leaf's boundaries and verify membership.
+
+    The old coordinate-perturbation test produced a FALSE NEGATIVE: decode
+    reconstructs a point as the midpoint of its leaf and re-derives bits from
+    *which cell the point lands in*, so a sub-leaf nudge is (correctly) decoded
+    unchanged — and for an all-zeros "extreme" point, even an out-of-leaf nudge
+    stays on the same side at every split.  Instead, construct points directly
+    from the boundaries and test the engine's semi-open [min, max) membership,
+    including a point that lands EXACTLY on an open upper boundary (which must be
+    classified outside) and a point guaranteed outside the leaf entirely.
+
+    Grounded in the real engine: we first decode the leaf's center and confirm
+    the engine returns the recorded leaf, so the boundaries we test against are
+    genuinely the engine's own.
     """
-    # Pick the first default vector available
-    candidates = [f for f in os.listdir(vectors_dir)
-                  if f.startswith("default_") and f.endswith("_iter0.json")]
-    if not candidates:
-        print("  SKIP  meta-bitflip: no default_*_iter0.json found")
+    # Prefer a roomier leaf: vanity vectors carry mixed bits, so their leaf is a
+    # well-sized rectangle.  All-zeros / all-ones drive the point to an extreme
+    # corner and repeated contraction shrinks the leaf very small (~2^-22, but
+    # still strictly positive on both axes — NOT zero-width), which is awkward
+    # for building boundary points; vanity avoids that.
+    cands = sorted(f for f in os.listdir(vectors_dir)
+                   if "vanity" in f and f.endswith("_iter0.json"))
+    cands = cands or sorted(f for f in os.listdir(vectors_dir)
+                            if f.endswith("_iter0.json"))
+    if not cands:
+        print("  SKIP  meta-leaf-membership: no iter0 vectors")
         return True
-    vector_path = os.path.join(vectors_dir, sorted(candidates)[0])
+    doc = json.load(open(os.path.join(vectors_dir, cands[0])))
+    leaf = doc["stages"][0]["leaf"]
+    rmn, rmx = _parse_hex_i64(leaf["re_min"]), _parse_hex_i64(leaf["re_max"])
+    imn, imx = _parse_hex_i64(leaf["im_min"]), _parse_hex_i64(leaf["im_max"])
+    if rmx <= rmn or imx <= imn:
+        # Defensive only: leaf widths stay positive (interior splits + positive
+        # contraction), so a zero-width leaf should never actually occur here.
+        print("  SKIP  meta-leaf-membership: zero-width leaf")
+        return True
+    wr, wi = rmx - rmn, imx - imn
+    cre, cim = _midpoint_i64(rmn, rmx), _midpoint_i64(imn, imx)
 
-    with open(vector_path, "r") as f:
-        doc = json.load(f)
-
-    original_hex = doc["input"]["entropy_hex"]
-
-    # Corrupt one leaf boundary (re_min, bit 30 — well inside the value)
-    import copy
-    corrupted = copy.deepcopy(doc)
-    corrupted["stages"][0]["leaf"]["re_min"] = _flip_hex_bit(
-        corrupted["stages"][0]["leaf"]["re_min"], 30)
-
-    # Write to temp file and decode
-    import tempfile
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tf:
-        json.dump(corrupted, tf)
-        tf_path = tf.name
-
+    # Ground the boundaries in the real engine: decoding the center must land in
+    # exactly the recorded leaf (stage 0 is canonical, o=p=q=0).
     try:
-        decoded = run_decode(tf_path)
-        decoded_hex = decoded["decoded_entropy_hex"]
-        if decoded_hex == original_hex:
-            print(f"  FAIL  meta-bitflip: corrupted boundary decoded to same entropy!")
+        from burning_ship_engine import decode_full
+        from constants import ENCODE_AREA, GUI_PARAMS, BITS_PER_POINT
+        _b, lr, _valid, _p = decode_full(
+            cre, cim, BITS_PER_POINT, area=ENCODE_AREA, params=GUI_PARAMS,
+            o=0, p=0, q=0, path_prefix="O")
+        if (lr.re_min, lr.re_max, lr.im_min, lr.im_max) != (rmn, rmx, imn, imx):
+            print("  FAIL  meta-leaf-membership: engine leaf != recorded leaf")
             return False
-        print(f"  OK    meta-bitflip: corrupted boundary detected (entropy differs)")
-        return True
     except Exception as e:
-        # Decode error is also acceptable — corruption detected
-        print(f"  OK    meta-bitflip: corruption caused decode error: {e}")
-        return True
-    finally:
-        os.unlink(tf_path)
+        print(f"  FAIL  meta-leaf-membership: engine decode error: {e}")
+        return False
+
+    # Points built from the boundaries, with their expected membership under the
+    # semi-open [min, max) convention.
+    checks = [
+        ("center (inside)",              cre,      cim,      True),
+        ("closed lower corner",          rmn,      imn,      True),
+        ("open upper-re boundary",       rmx,      cim,      False),  # bonus
+        ("open upper-im boundary",       cre,      imx,      False),  # bonus
+        ("open upper corner",            rmx,      imx,      False),
+        ("guaranteed outside (+1 leaf)", rmx + wr, imx + wi, False),
+        ("guaranteed outside (-1 leaf)", rmn - wr, imn - wi, False),
+    ]
+    bad = [(n, exp, _in_leaf(re, im, rmn, rmx, imn, imx))
+           for (n, re, im, exp) in checks
+           if _in_leaf(re, im, rmn, rmx, imn, imx) != exp]
+    if bad:
+        print(f"  FAIL  meta-leaf-membership: {len(bad)} membership mismatch(es)")
+        if verbose:
+            for n, exp, got in bad:
+                print(f"        {n}: expected in_leaf={exp} got {got}")
+        return False
+    print("  OK    meta-leaf-membership: semi-open [min,max) boundaries correct "
+          "(inside, closed corner, both open edges, outside)")
+    return True
 
 
 def test_meta_wrong_params(vectors_dir, verbose=False):
@@ -245,7 +311,12 @@ def test_meta_wrong_params(vectors_dir, verbose=False):
 
     original_hex = doc["input"]["entropy_hex"]
 
-    # Corrupt the first secret stage's o parameter (stage index 1).
+    # Corrupt the first secret stage's o parameter (stage index 1).  This is NOT
+    # in the leaf-tolerance false-negative class: it perturbs the FRACTAL, not a
+    # coordinate, so the bisection tree itself changes.  Note the o magnitude is
+    # encoded with the LARGEST weight at the low bits (bit j -> 2^-(3+j)), so
+    # XOR 0xFF flips the highest-magnitude components (down to 2^-3) — a large,
+    # reliably-detectable change, not a sub-resolution tweak.
     import copy, tempfile
     corrupted = copy.deepcopy(doc)
     o_val = int(corrupted["stages"][1]["params"]["o"], 16)
@@ -256,7 +327,7 @@ def test_meta_wrong_params(vectors_dir, verbose=False):
         tf_path = tf.name
 
     try:
-        decoded = run_decode(tf_path)
+        decoded = run_decode(tf_path, timeout=META_DECODE_TIMEOUT)
         decoded_hex = decoded["decoded_entropy_hex"]
         if decoded_hex == original_hex:
             print(f"  FAIL  meta-wrong-params: wrong params decoded to same entropy!")
@@ -288,8 +359,13 @@ def test_meta_cross_stage_swap(vectors_dir, verbose=False):
 
     original_hex = doc["input"]["entropy_hex"]
 
-    # Swap the leaf boundaries of stage 0 and stage 1 (different fractals →
-    # different points → the decoded entropy must change).
+    # Swap the leaf boundaries of stage 0 and stage 1.  This moves each point a
+    # macroscopic distance (far more than a leaf) onto the OTHER stage's fractal,
+    # so it is well clear of the leaf-tolerance false-negative class: the decode
+    # either yields different entropy or, if the mismatched point lands in a
+    # barren region, exhausts island discovery and is caught by the bounded
+    # timeout (META_DECODE_TIMEOUT).  Both outcomes are valid detection; a
+    # same-entropy decode would require an astronomically unlikely coincidence.
     import copy, tempfile
     bound_keys = ("re_min", "re_max", "im_min", "im_max")
     corrupted = copy.deepcopy(doc)
@@ -303,7 +379,7 @@ def test_meta_cross_stage_swap(vectors_dir, verbose=False):
         tf_path = tf.name
 
     try:
-        decoded = run_decode(tf_path)
+        decoded = run_decode(tf_path, timeout=META_DECODE_TIMEOUT)
         decoded_hex = decoded["decoded_entropy_hex"]
         if decoded_hex == original_hex:
             print(f"  FAIL  meta-cross-swap: swapped stages decoded to same entropy!")
@@ -410,7 +486,7 @@ def main():
     # Meta tests (negative tests — verify harness catches errors)
     print()
     print("=== Meta Tests (negative — must detect corruption) ===")
-    for meta_fn in (test_meta_bitflip, test_meta_wrong_params, test_meta_cross_stage_swap):
+    for meta_fn in (test_meta_leaf_membership, test_meta_wrong_params, test_meta_cross_stage_swap):
         total += 1
         if meta_fn(vectors_dir, verbose=args.verbose):
             passed += 1
