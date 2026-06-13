@@ -37,6 +37,29 @@ cheap real-Argon2 vectors so the meta tests have `iter1`/`iter2` inputs.
 | real Argon2 (mini) | `mini_zeros_iter1.json`, `mini_zeros_iter2.json`, `mini_vanity1_iter1.json` | 1–2 actual Argon2 passes |
 | real Argon2 (default) | `default_zeros_iter1.json` | A 4-stage secret with real derivation; feeds the meta tests |
 
+### `zeros` / `ones` as a contraction stress test
+
+The all-`0` (and all-`1`) vectors are not just boundary inputs — they are a
+deliberate **stress test of the contraction heuristic**. An all-`0`/all-`1`
+bisection path keeps selecting the same child, steering toward the sparse edge
+"void" away from the island structure, where the chosen child is repeatedly the
+*larger* one — so contraction `f(r) = (1 + 3r)/4` fires on nearly every level,
+far more than on a mixed path. Because `f` is floored at `1/4`, the leaf shrinks
+geometrically toward the void but stays **strictly positive** (these leaves are
+~`2⁻²²` wide — small, never zero). Their clean round-trip confirms the
+encoder still lands a valid positive-area leaf and decode's dead-zone validation
+still holds under maximal contraction.
+
+**Navigability preserved at all scales (the key positive result).** Smaller leaf
+area does *not* mean a lost, structureless location. Encoding the canonical
+stage-0 all-`0` and all-`1` points, **every one of the 32 bisection levels finds
+good islands** — `≥ 32` (the `target_good` floor; min 32, max ~56–62) at every
+level, with **zero** geometric-fallback steps (no level enters an island-less
+void). So the path down to these contracted corner leaves is densely populated
+with identifiable reference points at *every zoom scale*: the extreme corner
+case remains navigable/recognizable, which is the a-priori evidence that the
+small leaf is still surrounded by usable structure.
+
 Regenerate with `python3 generate_vectors.py` (skips files that already exist).
 
 ## Cross-mode invariant
