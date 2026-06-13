@@ -1,0 +1,136 @@
+{
+  "version": "0.1.0",
+  "protocol_version": "0.2.0",
+  "input": {
+    "entropy_hex": "df936139cbdefbc1acb91913d85e4f61",
+    "entropy_bits": 128,
+    "bip39_mnemonic": "test only example nut use this real case because seed need secret",
+    "argon2_profile": "b",
+    "argon2_iterations": 0,
+    "gw_mode": "d",
+    "bip39_words": 12,
+    "n_stages": 4
+  },
+  "stages": [
+    {
+      "index": 0,
+      "canonical": true,
+      "params": {
+        "o": "0x0000000000000000",
+        "p": "0x0000000000000000",
+        "q": "0x0000000000000000",
+        "o_re": 0.0,
+        "o_im": 0.0,
+        "p_re": 0.0,
+        "p_im": 0.0,
+        "q_re": 0.0,
+        "q_im": 0.0
+      },
+      "argon2": null,
+      "leaf": {
+        "re_min": "0x0A7850405A4B10E4",
+        "re_max": "0x0A785051128CD686",
+        "im_min": "0xE9B4399BD8A55B5E",
+        "im_max": "0xE9B439AC32E45296",
+        "re_min_f64": 0.654373408677831,
+        "re_max_f64": 0.6543734709637669,
+        "im_min_f64": -1.3934997474913555,
+        "im_max_f64": -1.393499686573459,
+        "path": "OrdLrDDdrDluRulrdldrUULldLURDruld"
+      }
+    },
+    {
+      "index": 1,
+      "canonical": false,
+      "params": {
+        "o": "0x00FE066F1491C9EE",
+        "p": "0xE26970110840C81A",
+        "q": "0xB53FC81220D799CC",
+        "o_re": 0.11677374178543687,
+        "o_im": 0.24060247838497162,
+        "p_re": 0.16800500499084592,
+        "p_im": -0.19143407250521705,
+        "q_re": 0.012597959546837956,
+        "q_im": -0.01759718608809635
+      },
+      "argon2": {
+        "input_hex": "df936139",
+        "iterations": 0,
+        "final_digest": "df93613900000000000000000000000000000000000000000000000000000000"
+      },
+      "leaf": {
+        "re_min": "0xFB89F40ABC080DCD",
+        "re_max": "0xFB89F4A711477122",
+        "im_min": "0xEFB63A029B46DCC9",
+        "im_max": "0xEFB63B0AA9BB8DD5",
+        "re_min_f64": -0.278819997852676,
+        "re_max_f64": -0.27881941546687344,
+        "im_min_f64": -1.0180110834294929,
+        "im_max_f64": -1.0180100997424941,
+        "path": "ORdlurLRrdRUrDRDlddrDRUrDrdLLulur"
+      }
+    },
+    {
+      "index": 2,
+      "canonical": false,
+      "params": {
+        "o": "0x29410A2EB4089B3B",
+        "p": "0x2DA3A230F8DFB531",
+        "q": "0xBFC7DB2368688F56",
+        "o_re": -0.2156717802863568,
+        "o_im": 0.11358837154693902,
+        "p_re": -0.1936912172823213,
+        "p_im": 0.13099245505873114,
+        "q_re": 0.026108824036782607,
+        "q_im": -0.04806126648327336
+      },
+      "argon2": {
+        "input_hex": "df936139cbdefbc1",
+        "iterations": 0,
+        "final_digest": "df936139cbdefbc1000000000000000000000000000000000000000000000000"
+      },
+      "leaf": {
+        "re_min": "0x089067E65753E054",
+        "re_max": "0x0890693659D11F87",
+        "im_min": "0xF153D268D72581E6",
+        "im_max": "0xF153D40120BE90D9",
+        "re_min_f64": 0.535255336542143,
+        "re_max_f64": 0.5352565882759065,
+        "im_min_f64": -0.9170356659575698,
+        "im_max_f64": -0.9170341449681378,
+        "path": "OrUdlRRulDLdrdlUdLULDrUldlUURULDR"
+      }
+    },
+    {
+      "index": 3,
+      "canonical": false,
+      "params": {
+        "o": "0x2CA4C5D72DDD45E3",
+        "p": "0x7C52C280730F4A14",
+        "q": "0x6CC97D32C8F9ABFA",
+        "o_re": 0.19495671545155346,
+        "o_im": 0.23011453752405941,
+        "p_re": 0.14468944672262296,
+        "p_im": 0.1256166267558001,
+        "q_re": -0.02339708458748646,
+        "q_im": 0.018736434023594484
+      },
+      "argon2": {
+        "input_hex": "df936139cbdefbc1acb91913",
+        "iterations": 0,
+        "final_digest": "df936139cbdefbc1acb919130000000000000000000000000000000000000000"
+      },
+      "leaf": {
+        "re_min": "0x07774A68A794821C",
+        "re_max": "0x07774AA8C4BE0467",
+        "im_min": "0xECA43A03AC79B819",
+        "im_max": "0xECA43A5CA4AFA950",
+        "re_min_f64": 0.46662369614321664,
+        "re_max_f64": 0.46662393498616084,
+        "im_min_f64": -1.2099056107039292,
+        "im_max_f64": -1.2099052792664418,
+        "path": "OrdlDrUulLdLDrdrLurlurdRdlDrUUluR"
+      }
+    }
+  ]
+}

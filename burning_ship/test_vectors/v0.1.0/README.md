@@ -2,33 +2,49 @@
 
 Engine version: `0.1.0`
 
-All vectors use Argon2 profile `b` (basic, 1 GiB, t=32, p=1).
+> **⚠️ PROVISIONAL — pre-1.0 protocol.** The chained protocol is still
+> evolving (`protocol_version` `0.2.0`; more breaking changes are planned —
+> new parameter families, etc.), so **comprehensive frozen vectors are
+> deliberately deferred to the stable `1.0.0` release** rather than rebuilt for
+> every interim bump. These vectors are stamped with their `protocol_version`,
+> and `test_vectors.py` carries a **version guard**: any vector whose
+> `protocol_version` differs from the current `protocol.PROTOCOL_VERSION` is
+> reported **STALE** and skipped — never counted as a pass. That is what keeps
+> deferral safe: a stale vector can never show false-green. The deterministic
+> core round-trip and the chained derivation are verified separately (see
+> `protocol.py` / commit history).
 
-## Vectors
+All vectors use Argon2 profile `b` (basic, 1 GiB, t=2, p=1).
 
-| File | Entropy | Mode | Argon2 iters | Purpose |
-|------|---------|------|-------------|---------|
-| `default_zeros_iter0.json` | 128-bit all zeros | default | 0 (identity) | Boundary: p=0 baseline |
-| `default_ones_iter0.json` | 128-bit all ones | default | 0 | Opposite extreme |
-| `default_single_bit_iter0.json` | 128-bit, only MSB set | default | 0 | Single bit difference |
-| `vanity1_iter0.json` | "never use this word..." | default | 0 | Self-disclaiming BIP39 |
-| `vanity2_iter0.json` | "never use this example..." | default | 0 | Self-disclaiming BIP39 |
-| `vanity2_iter1.json` | "never use this example..." | default | 1 | Tests 1 Argon2 pass |
-| `vanity2_iter2.json` | "never use this example..." | default | 2 | Tests Argon2 chaining + intermediates |
-| `vanity3_iter0.json` | "test only example nut..." (case) | default | 0 | Self-disclaiming BIP39 |
-| `vanity4_iter0.json` | "test only example nut..." (life) | default | 0 | Self-disclaiming BIP39 |
-| `mini_zeros_iter0.json` | 64-bit all zeros | mini | 0 | Mini preset (6 words) |
-| `mini_abandon_iter0.json` | "abandon...able" (6 words) | mini | 0 | Cross-mode test |
-| `large_zeros_iter0.json` | 256-bit all zeros | large | 0 | Large preset (24 words) |
-| `large_abandon_iter0.json` | "abandon...art" (24 words) | large | 0 | Cross-mode test |
-| `default_abandon_iter0.json` | "abandon...about" (12 words) | default | 0 | Cross-mode test |
+These vectors target the **chained one-point-per-stage protocol**: one 32-bit
+point per stage, `n_stages = entropy_bits / 32` (mini=2, default=4, large=8).
+Stage 0 is canonical; every later stage's fractal is derived by hashing all
+preceding points (Argon2^iters → SHA-256 → (o,p,q)). Each vector is a `stages[]`
+document (`stages[i].params`, `stages[i].leaf`, `stages[i].argon2`).
+
+## Generation policy
+
+Because each Argon2 iteration now runs once per *secret* stage
+(`n_stages − 1` chained derivations), `iters > 0` vectors are expensive for the
+larger presets. The frozen set therefore covers the full breadth at **iter0**
+(an instant identity derivation that still exercises the chain — every secret
+stage gets distinct params from the growing prior-point prefix), plus a few
+cheap real-Argon2 vectors so the meta tests have `iter1`/`iter2` inputs.
+
+| Group | Files | Purpose |
+|-------|-------|---------|
+| iter0, all presets/seeds | `{mini,default,large}_{zeros,ones,abandon,vanity1,vanity2,vanity3,vanity4}_iter0.json` | Full-breadth frozen + round-trip coverage |
+| real Argon2 (mini) | `mini_zeros_iter1.json`, `mini_zeros_iter2.json`, `mini_vanity1_iter1.json` | 1–2 actual Argon2 passes |
+| real Argon2 (default) | `default_zeros_iter1.json` | A 4-stage secret with real derivation; feeds the meta tests |
+
+Regenerate with `python3 generate_vectors.py` (skips files that already exist).
 
 ## Cross-mode invariant
 
-The first point's leaf (stage 1, point 1) is identical across
-`mini_abandon_iter0`, `default_abandon_iter0`, and `large_abandon_iter0`
-because all three share the same first 32 bits of entropy and the area
-tree is an invariant property of the fractal.
+The first stage's leaf (stage 0) is identical across `mini_abandon_iter0`,
+`default_abandon_iter0`, and `large_abandon_iter0`: all three share the same
+first 32 bits of entropy (all-zero "abandon" words) on the same canonical
+fractal, and the area tree is an invariant property of the fractal.
 
 ## Running
 

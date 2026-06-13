@@ -1,21 +1,33 @@
 {
   "version": "0.1.0",
+  "protocol_version": "0.2.0",
   "input": {
     "entropy_hex": "df936139cbdefbc1",
     "entropy_bits": 64,
     "bip39_mnemonic": "test only example nut use this",
     "argon2_profile": "b",
     "argon2_iterations": 0,
-    "gw_mode": "m"
+    "gw_mode": "m",
+    "bip39_words": 6,
+    "n_stages": 2
   },
-  "stage1": {
-    "params": {
-      "o": 0,
-      "p": 0,
-      "q": 0
-    },
-    "leaves": [
-      {
+  "stages": [
+    {
+      "index": 0,
+      "canonical": true,
+      "params": {
+        "o": "0x0000000000000000",
+        "p": "0x0000000000000000",
+        "q": "0x0000000000000000",
+        "o_re": 0.0,
+        "o_im": 0.0,
+        "p_re": 0.0,
+        "p_im": 0.0,
+        "q_re": 0.0,
+        "q_im": 0.0
+      },
+      "argon2": null,
+      "leaf": {
         "re_min": "0x0A7850405A4B10E4",
         "re_max": "0x0A785051128CD686",
         "im_min": "0xE9B4399BD8A55B5E",
@@ -24,37 +36,29 @@
         "re_max_f64": 0.6543734709637669,
         "im_min_f64": -1.3934997474913555,
         "im_max_f64": -1.393499686573459,
-        "point": 1,
         "path": "OrdLrDDdrDluRulrdldrUULldLURDruld"
       }
-    ]
-  },
-  "argon2": {
-    "input_hex": "df936139",
-    "profile": "basic",
-    "iterations": 0,
-    "digests": [
-      {
-        "iteration": 0,
-        "hex": "df93613900000000000000000000000000000000000000000000000000000000"
-      }
-    ],
-    "final_digest": "df93613900000000000000000000000000000000000000000000000000000000"
-  },
-  "stage2": {
-    "params": {
-      "o": "0x00FE066F1491C9EE",
-      "p": "0xE26970110840C81A",
-      "q": "0xB53FC81220D799CC",
-      "o_re": 0.11677374178543687,
-      "o_im": 0.24060247838497162,
-      "p_re": 0.16800500499084592,
-      "p_im": -0.19143407250521705,
-      "q_re": 0.012597959546837956,
-      "q_im": -0.01759718608809635
     },
-    "leaves": [
-      {
+    {
+      "index": 1,
+      "canonical": false,
+      "params": {
+        "o": "0x00FE066F1491C9EE",
+        "p": "0xE26970110840C81A",
+        "q": "0xB53FC81220D799CC",
+        "o_re": 0.11677374178543687,
+        "o_im": 0.24060247838497162,
+        "p_re": 0.16800500499084592,
+        "p_im": -0.19143407250521705,
+        "q_re": 0.012597959546837956,
+        "q_im": -0.01759718608809635
+      },
+      "argon2": {
+        "input_hex": "df936139",
+        "iterations": 0,
+        "final_digest": "df93613900000000000000000000000000000000000000000000000000000000"
+      },
+      "leaf": {
         "re_min": "0xFB89F40ABC080DCD",
         "re_max": "0xFB89F4A711477122",
         "im_min": "0xEFB63A029B46DCC9",
@@ -63,9 +67,8 @@
         "re_max_f64": -0.27881941546687344,
         "im_min_f64": -1.0180110834294929,
         "im_max_f64": -1.0180100997424941,
-        "point": 1,
         "path": "ORdlurLRrdRUrDRDlddrDRUrDrdLLulur"
       }
-    ]
-  }
+    }
+  ]
 }

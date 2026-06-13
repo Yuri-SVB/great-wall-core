@@ -9,7 +9,6 @@ from bip39 import mnemonic_to_bits, bits_to_mnemonic
 from constants import (
     BITS_PER_POINT, ENCODE_AREA, GUI_PARAMS,
     STAGE1_O, STAGE1_P, STAGE1_Q,
-    STAGE1_NUM_POINTS, STAGE2_NUM_POINTS,
     PROFILE_BASIC, PROFILE_ADVANCED, PROFILE_GREAT_WALL,
 )
 
@@ -23,13 +22,14 @@ def argon2_path_marker(profile, iterations):
     return f"{tag}{iterations}"
 
 
-def encode_bip39(mnemonic_str, num_points=None):
+def encode_bip39(mnemonic_str, num_points=1):
     """Encode a BIP39 mnemonic into fractal points (first stage).
 
-    num_points: points per stage (default: from global STAGE1_NUM_POINTS).
+    DEPRECATED: legacy two-stage helper.  The one-point-per-stage protocol
+    drives encoding through :func:`protocol.encode_entropy`; this remains only
+    for the not-yet-migrated GUI path.  num_points defaults to 1 (one point
+    per stage).
     """
-    if num_points is None:
-        num_points = STAGE1_NUM_POINTS
     bits = mnemonic_to_bits(mnemonic_str)
     entropy_bits = bits[:len(bits) - len(bits) // 33]  # strip checksum
     stage1_bits = entropy_bits[:num_points * BITS_PER_POINT]
@@ -53,10 +53,11 @@ def encode_bip39(mnemonic_str, num_points=None):
     return points, chunks, all_steps, final_rects
 
 
-def encode_bip39_stage2(mnemonic_str, o, p, q, num_points=None):
-    """Encode the last entropy bits into fractal points (stage 2)."""
-    if num_points is None:
-        num_points = STAGE2_NUM_POINTS
+def encode_bip39_stage2(mnemonic_str, o, p, q, num_points=1):
+    """Encode the last entropy bits into fractal points (stage 2).
+
+    DEPRECATED: legacy two-stage helper; see :func:`encode_bip39`.
+    """
     bits = mnemonic_to_bits(mnemonic_str)
     entropy_bits = bits[:len(bits) - len(bits) // 33]  # strip checksum
     stage2_bits = entropy_bits[num_points * BITS_PER_POINT:]

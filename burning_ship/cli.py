@@ -2,6 +2,11 @@
 """
 Great Wall CLI — deterministic encode/decode with JSON output.
 
+The protocol encodes one 32-bit point per stage.  Stage 0 is the canonical
+Burning Ship (o=p=q=0); every later stage's fractal is derived by hashing all
+preceding points through the memory-hard chain (Argon2 → SHA-256 → (o,p,q)).
+``n_stages = entropy_bits / 32``.
+
 Usage:
   # Encode from hex entropy
   python3 cli.py encode --entropy a1b2c3d4... --profile b --iterations 3 --mode d
@@ -9,7 +14,7 @@ Usage:
   # Encode from BIP39 mnemonic
   python3 cli.py encode --bip39 "abandon abandon ..." --profile b --iterations 3 --mode d
 
-  # Decode from leaf centers JSON
+  # Decode from a stage document JSON
   python3 cli.py decode --input vectors.json
 """
 
@@ -17,8 +22,6 @@ import sys
 import os
 import json
 import argparse
-import struct
-import hashlib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -31,11 +34,10 @@ from burning_ship_engine import (
 from bip39 import mnemonic_to_bits, bits_to_mnemonic
 from constants import (
     BITS_PER_POINT, ENCODE_AREA, GUI_PARAMS,
-    STAGE1_O, STAGE1_P, STAGE1_Q,
     SIZE_PRESETS, ARGON2_INPUT_BYTES,
 )
 from encoding import bits_to_bytes, bits_to_hex
-from argon2_pipeline import derive_stage2_params
+from protocol import encode_entropy, PROTOCOL_VERSION
 
 # ---------------------------------------------------------------------------
 # Profile mapping
@@ -48,10 +50,11 @@ PROFILE_MAP = {
 }
 PROFILE_NAMES = {"b": "basic", "a": "advanced", "g": "great_wall"}
 
+# Back-compat short modes (m/d/l) map onto the word-count preset keys.
 MODE_MAP = {
-    "m": "mini",
-    "d": "default",
-    "l": "large",
+    "m": "6w",
+    "d": "12w",
+    "l": "24w",
 }
 
 
@@ -72,37 +75,6 @@ def _rect_to_dict(rect):
         "im_min_f64": rect.im_min_f64(),
         "im_max_f64": rect.im_max_f64(),
     }
-
-
-def _encode_stage(stage_bits, o, p, q):
-    """Encode one stage's bits into points, returning leaf dicts."""
-    num_points = len(stage_bits) // BITS_PER_POINT
-    chunks = [stage_bits[i * BITS_PER_POINT:(i + 1) * BITS_PER_POINT]
-              for i in range(num_points)]
-    leaves = []
-    for i, chunk in enumerate(chunks):
-        result = encode(chunk, area=ENCODE_AREA, params=GUI_PARAMS,
-                        o=o, p=p, q=q, path_prefix="O")
-        leaf = _rect_to_dict(result.final_rect)
-        leaf["point"] = i + 1
-        leaf["path"] = result.path
-        leaves.append(leaf)
-    return leaves
-
-
-def _run_argon2(stage1_bytes, profile_id, iterations):
-    """Run iterative Argon2, collecting all intermediate digests."""
-    digests = []
-    if iterations == 0:
-        digest = stage1_bytes.ljust(ARGON2_DIGEST_BYTES, b'\x00')[:ARGON2_DIGEST_BYTES]
-        digests.append({"iteration": 0, "hex": digest.hex()})
-    else:
-        digest = argon2_single(stage1_bytes, profile_id)
-        digests.append({"iteration": 1, "hex": digest.hex()})
-        for i in range(1, iterations):
-            digest = argon2_single(digest, profile_id)
-            digests.append({"iteration": i + 1, "hex": digest.hex()})
-    return digest, digests
 
 
 def _parse_hex_i64(hex_str):
@@ -127,17 +99,24 @@ def _center_from_leaf(leaf):
     return _midpoint(re_min, re_max), _midpoint(im_min, im_max)
 
 
-def _decode_leaves(leaves, o, p, q):
-    """Decode a list of leaf dicts to bits, using boundaries to derive centers."""
-    all_bits = []
-    for leaf in leaves:
-        re_raw, im_raw = _center_from_leaf(leaf)
-        bits, _rect, valid, _path = decode_full(
-            re_raw, im_raw, BITS_PER_POINT,
-            area=ENCODE_AREA, params=GUI_PARAMS,
-            o=o, p=p, q=q, path_prefix="O")
-        all_bits.extend(bits)
-    return all_bits
+def _params_dict(o, p, q, params_tuple):
+    """Build the JSON params dict for one stage's fractal.
+
+    ``params_tuple`` is the 9-tuple from the chain derivation (with float
+    display values), or ``None`` for the canonical first stage.
+    """
+    if params_tuple is None:
+        o_re = o_im = p_re = p_im = q_re = q_im = 0.0
+    else:
+        (_o, o_re, o_im, _p, p_re, p_im, _q, q_re, q_im) = params_tuple
+    return {
+        "o": _hex_fixed(o),
+        "p": _hex_fixed(p),
+        "q": _hex_fixed(q),
+        "o_re": o_re, "o_im": o_im,
+        "p_re": p_re, "p_im": p_im,
+        "q_re": q_re, "q_im": q_im,
+    }
 
 
 def _entropy_from_hex(hex_str):
@@ -163,15 +142,26 @@ def _entropy_from_bip39(mnemonic_str):
 # ---------------------------------------------------------------------------
 
 def cmd_encode(args):
-    # Parse mode
-    mode_name = MODE_MAP.get(args.mode)
-    if mode_name is None:
-        print(f"Error: unknown mode '{args.mode}' (use m/d/l)", file=sys.stderr)
+    # Resolve the size preset.  --words selects any supported size (3..24, a
+    # multiple of 3); --mode m/d/l is the legacy 6/12/24-word shortcut.
+    if args.words is not None:
+        preset_key = f"{args.words}w"
+        if preset_key not in SIZE_PRESETS:
+            valid = ", ".join(str(p["bip39_words"]) for p in SIZE_PRESETS.values())
+            print(f"Error: unsupported --words {args.words} (choose from {valid})",
+                  file=sys.stderr)
+            sys.exit(1)
+    elif args.mode is not None:
+        preset_key = MODE_MAP.get(args.mode)
+        if preset_key is None:
+            print(f"Error: unknown mode '{args.mode}' (use m/d/l)", file=sys.stderr)
+            sys.exit(1)
+    else:
+        print("Error: provide --words N or --mode m/d/l", file=sys.stderr)
         sys.exit(1)
-    preset = SIZE_PRESETS[mode_name]
-    points_per_stage = preset["points_per_stage"]
+    preset = SIZE_PRESETS[preset_key]
     total_entropy = preset["entropy_bits"]
-    bits_per_stage = points_per_stage * BITS_PER_POINT
+    n_stages = preset["n_stages"]
 
     # Parse entropy
     if args.bip39:
@@ -194,29 +184,37 @@ def cmd_encode(args):
         sys.exit(1)
     iterations = args.iterations
 
-    # Split entropy
-    stage1_bits = entropy_bits[:bits_per_stage]
-    stage2_bits = entropy_bits[bits_per_stage:]
+    # Run the chained pipeline: one point per stage, fractal k derived from
+    # the memory-hard hash of all preceding points.
+    stages = encode_entropy(entropy_bits, profile_id, iterations)
 
-    # Stage 1
-    stage1_leaves = _encode_stage(stage1_bits, STAGE1_O, STAGE1_P, STAGE1_Q)
-
-    # Argon2
-    stage1_bytes = bits_to_bytes(stage1_bits)
-    final_digest, argon2_digests = _run_argon2(stage1_bytes, profile_id, iterations)
-
-    # Derive stage-2 params
-    o, o_re, o_im, p, p_re, p_im, q, q_re, q_im = derive_stage2_params(final_digest)
-
-    # Stage 2
-    stage2_leaves = _encode_stage(stage2_bits, o, p, q)
-
-    # BIP39 mnemonic
     mnemonic = bits_to_mnemonic(entropy_bits)
 
-    # Build output
+    # Build per-stage output records.
+    stage_docs = []
+    for s in stages:
+        leaf = _rect_to_dict(s.result.final_rect)
+        leaf["path"] = s.result.path
+        if s.canonical:
+            argon2 = None
+        else:
+            prior_bits = entropy_bits[:s.index * BITS_PER_POINT]
+            argon2 = {
+                "input_hex": bits_to_bytes(prior_bits).hex(),
+                "iterations": iterations,
+                "final_digest": s.digest.hex(),
+            }
+        stage_docs.append({
+            "index": s.index,
+            "canonical": s.canonical,
+            "params": _params_dict(s.o, s.p, s.q, s.params),
+            "argon2": argon2,
+            "leaf": leaf,
+        })
+
     doc = {
         "version": get_engine_version(),
+        "protocol_version": PROTOCOL_VERSION,
         "input": {
             "entropy_hex": bits_to_hex(entropy_bits),
             "entropy_bits": total_entropy,
@@ -224,36 +222,10 @@ def cmd_encode(args):
             "argon2_profile": args.profile,
             "argon2_iterations": iterations,
             "gw_mode": args.mode,
+            "bip39_words": preset["bip39_words"],
+            "n_stages": n_stages,
         },
-        "stage1": {
-            "params": {
-                "o": STAGE1_O,
-                "p": STAGE1_P,
-                "q": STAGE1_Q,
-            },
-            "leaves": stage1_leaves,
-        },
-        "argon2": {
-            "input_hex": stage1_bytes.hex(),
-            "profile": PROFILE_NAMES[args.profile],
-            "iterations": iterations,
-            "digests": argon2_digests,
-            "final_digest": final_digest.hex(),
-        },
-        "stage2": {
-            "params": {
-                "o": _hex_fixed(o),
-                "p": _hex_fixed(p),
-                "q": _hex_fixed(q),
-                "o_re": o_re,
-                "o_im": o_im,
-                "p_re": p_re,
-                "p_im": p_im,
-                "q_re": q_re,
-                "q_im": q_im,
-            },
-            "leaves": stage2_leaves,
-        },
+        "stages": stage_docs,
     }
 
     json.dump(doc, sys.stdout, indent=2)
@@ -269,33 +241,34 @@ def cmd_decode(args):
         doc = json.load(f)
 
     version = doc.get("version", "unknown")
+    protocol_version = doc.get("protocol_version", "unknown")
+    stages = doc["stages"]
 
-    # Stage-1 params
-    s1_params = doc["stage1"]["params"]
-    s1_o, s1_p, s1_q = s1_params["o"], s1_params["p"], s1_params["q"]
+    # Decode each stage's point using its stored fractal parameters.  (The
+    # document carries the per-stage params so a vector can be checked without
+    # re-running the memory-hard chain; the live protocol re-derives them.)
+    all_bits = []
+    for st in sorted(stages, key=lambda s: s["index"]):
+        params = st["params"]
+        o = params["o"] if not isinstance(params["o"], str) else _parse_hex_i64(params["o"])
+        p = params["p"] if not isinstance(params["p"], str) else _parse_hex_i64(params["p"])
+        q = params["q"] if not isinstance(params["q"], str) else _parse_hex_i64(params["q"])
+        re_raw, im_raw = _center_from_leaf(st["leaf"])
+        bits, _rect, _valid, _path = decode_full(
+            re_raw, im_raw, BITS_PER_POINT,
+            area=ENCODE_AREA, params=GUI_PARAMS,
+            o=o, p=p, q=q, path_prefix="O")
+        all_bits.extend(bits)
 
-    # Decode stage 1 from leaf boundaries
-    stage1_bits = _decode_leaves(doc["stage1"]["leaves"], s1_o, s1_p, s1_q)
-
-    # Stage-2 params
-    s2_params = doc["stage2"]["params"]
-    s2_o = _parse_hex_i64(s2_params["o"]) if isinstance(s2_params["o"], str) else s2_params["o"]
-    s2_p = _parse_hex_i64(s2_params["p"]) if isinstance(s2_params["p"], str) else s2_params["p"]
-    s2_q = _parse_hex_i64(s2_params["q"]) if isinstance(s2_params["q"], str) else s2_params["q"]
-
-    # Decode stage 2 from leaf boundaries
-    stage2_bits = _decode_leaves(doc["stage2"]["leaves"], s2_o, s2_p, s2_q)
-
-    all_entropy = stage1_bits + stage2_bits
-    mnemonic = bits_to_mnemonic(all_entropy)
+    mnemonic = bits_to_mnemonic(all_bits)
 
     result = {
         "version": version,
-        "decoded_entropy_hex": bits_to_hex(all_entropy),
-        "decoded_entropy_bits": len(all_entropy),
+        "protocol_version": protocol_version,
+        "decoded_entropy_hex": bits_to_hex(all_bits),
+        "decoded_entropy_bits": len(all_bits),
         "bip39_mnemonic": mnemonic,
-        "stage1_hex": bits_to_hex(stage1_bits),
-        "stage2_hex": bits_to_hex(stage2_bits),
+        "n_stages": len(stages),
     }
 
     json.dump(result, sys.stdout, indent=2)
@@ -312,18 +285,23 @@ def main():
     sub = parser.add_subparsers(dest="command")
 
     # encode
-    enc = sub.add_parser("encode", help="Encode entropy → fractal leaves (JSON)")
+    enc = sub.add_parser("encode", help="Encode entropy → fractal stages (JSON)")
     enc.add_argument("--entropy", type=str, help="Hex string of entropy bits")
     enc.add_argument("--bip39", type=str, help="BIP39 mnemonic (alternative to --entropy)")
     enc.add_argument("--profile", type=str, required=True,
                      help="Argon2 profile: b=basic, a=advanced, g=great_wall")
     enc.add_argument("--iterations", type=int, required=True,
-                     help="Number of Argon2 iterations (0=identity)")
-    enc.add_argument("--mode", type=str, required=True,
-                     help="Size mode: m=mini(6w), d=default(12w), l=large(24w)")
+                     help="Argon2 iterations per stage link (0=identity); the "
+                          "same count is applied to every stage")
+    enc.add_argument("--words", type=int, default=None,
+                     help="Mnemonic size in words: any multiple of 3 from 3 to "
+                          "24 (= 32..256 entropy bits = 1..8 stages)")
+    enc.add_argument("--mode", type=str, default=None,
+                     help="Legacy size shortcut: m=6w, d=12w, l=24w "
+                          "(use --words for other sizes)")
 
     # decode
-    dec = sub.add_parser("decode", help="Decode leaf centers JSON → entropy")
+    dec = sub.add_parser("decode", help="Decode a stage document JSON → entropy")
     dec.add_argument("--input", type=str, required=True,
                      help="Path to encode output JSON")
 

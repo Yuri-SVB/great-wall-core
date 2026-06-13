@@ -1,0 +1,136 @@
+{
+  "version": "0.1.0",
+  "protocol_version": "0.2.0",
+  "input": {
+    "entropy_hex": "951df78327313d565e861493d47ba558",
+    "entropy_bits": 128,
+    "bip39_mnemonic": "never use this example because private key secret need phrase true random",
+    "argon2_profile": "b",
+    "argon2_iterations": 0,
+    "gw_mode": "d",
+    "bip39_words": 12,
+    "n_stages": 4
+  },
+  "stages": [
+    {
+      "index": 0,
+      "canonical": true,
+      "params": {
+        "o": "0x0000000000000000",
+        "p": "0x0000000000000000",
+        "q": "0x0000000000000000",
+        "o_re": 0.0,
+        "o_im": 0.0,
+        "p_re": 0.0,
+        "p_im": 0.0,
+        "q_re": 0.0,
+        "q_im": 0.0
+      },
+      "argon2": null,
+      "leaf": {
+        "re_min": "0x090CEA8BE71B5F40",
+        "re_max": "0x090CEA91A6718FB2",
+        "im_min": "0xF01A7C46B4794B18",
+        "im_max": "0xF01A7C4C313BCDDF",
+        "re_min_f64": 0.5656533684684388,
+        "re_max_f64": 0.5656533898792054,
+        "im_min_f64": -0.9935338247382053,
+        "im_max_f64": -0.9935338042962596,
+        "path": "OrULdLruRulURdrurdrRdurrdrlUUludD"
+      }
+    },
+    {
+      "index": 1,
+      "canonical": false,
+      "params": {
+        "o": "0x8870023505270EEF",
+        "p": "0xC7CE9BD73827EDE2",
+        "q": "0xCA37A1F843EC0948",
+        "o_re": 0.24164159037172794,
+        "o_im": -0.1682131001725793,
+        "p_re": 0.16001871309708804,
+        "p_im": -0.24016085179755464,
+        "q_re": 0.00453206806560047,
+        "q_im": -0.007696078420849517
+      },
+      "argon2": {
+        "input_hex": "951df783",
+        "iterations": 0,
+        "final_digest": "951df78300000000000000000000000000000000000000000000000000000000"
+      },
+      "leaf": {
+        "re_min": "0xE63E83668C2296D9",
+        "re_max": "0xE63E85802C391501",
+        "im_min": "0xFA4D0422213CD1A7",
+        "im_max": "0xFA4D05D329B87A21",
+        "re_min_f64": -1.609737967895706,
+        "re_max_f64": -1.6097359650852308,
+        "im_min_f64": -0.35619723003419385,
+        "im_max_f64": -0.35619561686005013,
+        "path": "OlUdLLdrDlURDluldlUdRdRuRURLDlDRu"
+      }
+    },
+    {
+      "index": 2,
+      "canonical": false,
+      "params": {
+        "o": "0x5657135B89FE918B",
+        "p": "0x8BF18DAFAAD187D1",
+        "q": "0x8641C0B4B24A3F08",
+        "o_re": -0.20462607685476542,
+        "o_im": 0.21365705749485642,
+        "p_re": -0.19330128526780754,
+        "p_im": -0.2449675784446299,
+        "q_re": -0.004146882507484406,
+        "q_im": -0.01098967483267188
+      },
+      "argon2": {
+        "input_hex": "951df78327313d56",
+        "iterations": 0,
+        "final_digest": "951df78327313d56000000000000000000000000000000000000000000000000"
+      },
+      "leaf": {
+        "re_min": "0xEBCB49534B99448D",
+        "re_max": "0xEBCB498C90217FDF",
+        "im_min": "0xEEC5476725B76855",
+        "im_max": "0xEEC547720D0920B4",
+        "re_min_f64": -1.2628695246007016,
+        "re_max_f64": -1.2628693112618805,
+        "im_min_f64": -1.0768362017447881,
+        "im_max_f64": -1.0768361611257473,
+        "path": "OldLDDrDLDLuluDrUlUldLrUldlurluRd"
+      }
+    },
+    {
+      "index": 3,
+      "canonical": false,
+      "params": {
+        "o": "0xAEA293889802382A",
+        "p": "0x4A44C188FE1ABA2E",
+        "q": "0x6F4EFB78895BA32A",
+        "o_re": -0.08213901659473777,
+        "o_im": -0.017369351582601666,
+        "p_re": -0.18181866774102673,
+        "p_im": 0.13355089962715283,
+        "q_re": -0.02069650054909289,
+        "q_im": 0.007537316385423765
+      },
+      "argon2": {
+        "input_hex": "951df78327313d565e861493",
+        "iterations": 0,
+        "final_digest": "951df78327313d565e8614930000000000000000000000000000000000000000"
+      },
+      "leaf": {
+        "re_min": "0x0A3C730F5D2B868A",
+        "re_max": "0x0A3C737A371CBE01",
+        "im_min": "0xED17DE9EDCA461D4",
+        "im_max": "0xED17DF2568314380",
+        "re_min_f64": 0.6397581672815434,
+        "re_max_f64": 0.6397585653337923,
+        "im_min_f64": -1.1816724581201252,
+        "im_max_f64": -1.1816719569005008,
+        "path": "OrdlDLDLuLrDDrurDRuRluRUrURURdlUL"
+      }
+    }
+  ]
+}

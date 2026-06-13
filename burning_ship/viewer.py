@@ -11,15 +11,15 @@ Controls:
   Enter                  Encode seed (when input focused)
   C                      Clear encoded points
   D                      Toggle debug mode (show hex logs)
-  W                      Cycle size preset (mini 6w/64b, default 12w/128b, large 24w/256b)
-  S                      Toggle select-points mode (click points to decode, stage 1)
-  T                      Toggle between Stage 1 (d=2) and Stage 2 (generalized d)
+  W                      Cycle size: any of 3..24 words (1..8 stages, 32..256 bits)
+  S                      Toggle select-points mode (click the active stage's point to decode)
+  T                      Cycle the active stage (through the derived stages)
   V                      Toggle area visualization for encoded/selected points
   , / .                  Navigate to previous/next bisection step (when V active)
   L                      Toggle brightness falloff (sigmoid cave-like dimming)
   X                      Stretch correction: click P1 then P2 to compress along that axis
   Z                      Clear all stretch corrections
-  F2                     Random encode (stage 1 + Argon2 + stage 2)
+  F2                     Random encode (full chain: all stages + Argon2 between them)
   F5                     Load session from JSON
   F6                     Save session to JSON
   Escape / Q             Quit (Escape cancels stretch mode if active)
@@ -59,6 +59,7 @@ from constants import (
     CURSOR_BLINK_MS, POINT_CLICK_THRESHOLD_PX, DEBUG_HEX_FIELD_CHARS,
     DEFAULT_BIP39_MNEMONIC,
     STAGE1_O, STAGE1_P, STAGE1_Q,
+    CANONICAL_O, CANONICAL_P, CANONICAL_Q,
     LEAF_BRIGHTNESS_BOOST, LEAF_BRIGHTNESS_FLOOR,
     LEAF_SATURATION_BOOST, LEAF_SATURATION_THRESHOLD,
     BRIGHTNESS_FALLOFF_BASE, BRIGHTNESS_EXPONENT_OFFSET,
@@ -66,21 +67,21 @@ from constants import (
     PROGRESSIVE_INITIAL_BLOCK,
     CONTRACTION_MULTIPLIER, CONTRACTION_DIVISOR,
     BITS_PER_POINT, SIZE_PRESETS, SIZE_PRESET_ORDER, INITIAL_SIZE_PRESET,
-    STAGE1_NUM_POINTS, STAGE2_NUM_POINTS,
     ENCODE_AREA, GUI_PARAMS,
 )
+import protocol
 
 from palettes import (
     PALETTES, PALETTE_NAMES, PALETTE_LUTS,
     ESC_TRANSFORMS, ESC_TRANSFORM_NAMES,
 )
 from encoding import (
-    argon2_path_marker, encode_bip39, encode_bip39_stage2,
-    decode_points, encode_bits_stage,
+    argon2_path_marker,
+    decode_points,
     bits_to_bytes, bits_to_hex, compute_checksum_bits,
 )
 from argon2_pipeline import (
-    run_argon2_iterative, derive_stage2_params,
+    run_argon2_iterative,
     decode_p_display, decode_q_display, decode_o_display,
     run_random_encode,
 )
@@ -97,6 +98,69 @@ from manual_mode import (
 # ---------------------------------------------------------------------------
 # Viewer state
 # ---------------------------------------------------------------------------
+
+def params_dict_from_tuple(params):
+    """Build a stage param dict from the 9-tuple returned by the protocol.
+
+    ``params`` is ``(o, o_re, o_im, p, p_re, p_im, q, q_re, q_im)`` or None
+    (canonical stage).  Returns the dict {"o","o_re",...} or None.
+    """
+    if params is None:
+        return None
+    o, o_re, o_im, p, p_re, p_im, q, q_re, q_im = params
+    return {"o": o, "o_re": o_re, "o_im": o_im,
+            "p": p, "p_re": p_re, "p_im": p_im,
+            "q": q, "q_re": q_re, "q_im": q_im}
+
+
+def entropy_from_mnemonic(mnemonic_str):
+    """Convert a BIP39 mnemonic to its entropy bits (checksum stripped)."""
+    bits = mnemonic_to_bits(mnemonic_str)
+    return bits[:len(bits) - len(bits) // 33]
+
+
+def populate_stages_from_results(state, stages):
+    """Populate state.stages_* lists from a list of protocol.StageResult.
+
+    Mirrors the Enter-encode path: each stage holds exactly one point.
+    """
+    for sr in stages:
+        i = sr.index
+        state.stages_encoded_points[i] = [sr.point]
+        state.stages_encoded_bits_chunks[i] = [sr.chunk]
+        state.stages_encoded_steps[i] = [sr.result.get_all_steps()]
+        state.stages_encoded_final_rects[i] = [sr.result.final_rect]
+        state.stages_params[i] = params_dict_from_tuple(sr.params)
+
+
+def encode_full_mnemonic(state):
+    """Encode the full mnemonic into all stages via protocol.encode_entropy.
+
+    Drives the memory-hard chain (N-1 derivations) synchronously, populating
+    every per-stage list and the per-stage params.  Raises ValueError on a bad
+    mnemonic.  Returns the entropy bits.
+    """
+    entropy_bits = entropy_from_mnemonic(state.input_text)
+    try:
+        iters = int(state.argon2_iterations)
+        if iters < 0:
+            raise ValueError
+    except ValueError:
+        iters = 0
+    stages = protocol.encode_entropy(entropy_bits, state.argon2_profile, iters)
+    populate_stages_from_results(state, stages)
+    # The cumulative prior-point bits feeding the NEXT derivation are all
+    # encoded bits (so a subsequent manual Argon2 step would be a no-op here).
+    state.argon2_stage1_bits = list(entropy_bits)
+    state.argon2_marker = argon2_path_marker(state.argon2_profile, iters)
+    state.stage = 0
+    state.selected_point_idx = None
+    state.selected_decoded_idx = None
+    state.argon2_digest = ""
+    cache_clear_stage2()
+    state.needs_redraw = True
+    return entropy_bits
+
 
 class ViewerState:
     def __init__(self, width=800, height=600):
@@ -133,17 +197,12 @@ class ViewerState:
         self.status_msg = "Press S to select points, D for debug mode"
         self.status_color = CLR_NEUTRAL
 
-        # Encoded points (list of (re, im, re_raw, im_raw) tuples)
-        # Stage 1 points (P1, P2) — first 64 entropy bits
-        self.stage1_encoded_points = []
-        self.stage1_encoded_bits_chunks = []
-        self.stage1_encoded_steps = []
-        self.stage1_encoded_final_rects = []
-        # Stage 2 points (P3, P4) — last 64 entropy bits
-        self.stage2_encoded_points = []
-        self.stage2_encoded_bits_chunks = []
-        self.stage2_encoded_steps = []
-        self.stage2_encoded_final_rects = []
+        # Per-stage encoded / derived / selected data.  Under the
+        # one-point-per-stage protocol there are n_stages stages, each holding
+        # exactly one 32-bit point; the inner lists therefore hold 0 or 1
+        # entries so the existing list-shaped consumers keep working.  All of
+        # this is (re-)created by reset_stage_data().
+        self.reset_stage_data()
 
         # Debug: selected encoded point index (None = none selected)
         self.selected_point_idx = None
@@ -152,20 +211,8 @@ class ViewerState:
 
         # Select-points mode
         self.select_mode = False
-        # During select_mode, selected_points / stage2_selected_points are
-        # padded with None for unfilled slots so the user can cycle (N) and
-        # overwrite any slot.  Outside select_mode they are flat lists of
-        # valid tuples (no None) once a stage has been fully decoded.
-        self.selected_points = []  # stage-1: list of (re_raw, im_raw) tuples
-        self.selected_steps = []   # list of step-data lists, one per decoded point
-        self.selected_final_rects = []  # list of Rect, one per decoded point
-        self.stage2_selected_points = []  # stage-2: list of (re_raw, im_raw) tuples
-        self.stage2_selected_steps = []
-        self.stage2_selected_final_rects = []
         self.select_active_idx = 0  # which slot the next click overwrites
         self.decoded_mnemonic = ""
-        self.decoded_stage1_bits = None  # 64 bits from stage-1 decode (for Argon2)
-        self.decoded_stage2_bits = None  # 64 bits from stage-2 decode
 
         # Path prefix accumulated during point selection
         self._select_path_prefix = "O"
@@ -222,31 +269,20 @@ class ViewerState:
         self.argon2_stop_requested = False # set by main thread; worker exits at next iteration boundary
         self.argon2_progress = 0           # completed iterations so far
         self.argon2_progress_total = 0     # total iterations requested
-        self.argon2_stage1_bits = None     # cached 64-bit list from encode/decode
+        self.argon2_stage1_bits = None     # cumulative prior-point bits feeding the NEXT derivation
         self.argon2_profile = PROFILE_BASIC  # 0=Basic, 1=Advanced, 2=Great Wall
         self.argon2_save_intermediate = False  # checkpoint intermediate digests (off by default)
         self.stage1_path = "O"              # accumulated path after stage 1
         self.argon2_marker = ""             # e.g. "B0", "A100"
 
-        # Stage-2 fractal parameters (derived from Argon2 digest).  o, p, q
-        # are all 64-bit reservoirs of entropy that select a private fractal
-        # from the second-stage space; the only operational difference is
-        # that p carries a baseline (constants.P_BASELINE_EXP) to steer the
-        # additive shift away from the canonical formula's degenerate-tail
-        # region.  Listed in alphabetic order to match all other o/p/q
-        # appearances in code and GUI.
-        self.stage2_o = None     # uint64 orbit seed
-        self.stage2_o_re = None  # float display value of Re(o)
-        self.stage2_o_im = None  # float display value of Im(o)
-        self.stage2_p = None     # uint64 additive perturbation
-        self.stage2_p_re = None  # float display value of Re(p)
-        self.stage2_p_im = None  # float display value of Im(p)
-        self.stage2_q = None     # uint64 linear perturbation
-        self.stage2_q_re = None  # float display value of Re(q)
-        self.stage2_q_im = None  # float display value of Im(q)
+        # Per-stage fractal parameters live in self.stages_params (a dict per
+        # stage, or None for the canonical stage 0 / not-yet-derived stages);
+        # they are (re-)created by reset_stage_data().  The stage2_* names are
+        # kept as compatibility properties that read/write the ACTIVE stage's
+        # param dict so the unchanged panel/render/debug code keeps working.
 
-        # Active rendering stage (1 = canonical d=2, 2 = perturbed)
-        self.stage = 1
+        # Active rendering stage index (0-based; 0 = canonical d=2).
+        self.stage = 0
 
         # Brightness falloff (cave-exploration effect)
         self.brightness_falloff = True
@@ -277,8 +313,14 @@ class ViewerState:
         return math.sqrt(2) ** self.zoom_exp
 
     @property
+    def n_stages(self):
+        return SIZE_PRESETS[self.size_preset]["n_stages"]
+
+    @property
     def points_per_stage(self):
-        return SIZE_PRESETS[self.size_preset]["points_per_stage"]
+        # One 32-bit point per stage, always.  Kept so the single-slot
+        # select/manual machinery keeps working unchanged.
+        return 1
 
     @property
     def entropy_bits(self):
@@ -290,52 +332,150 @@ class ViewerState:
 
     @property
     def bits_per_stage(self):
-        return self.points_per_stage * BITS_PER_POINT
+        return BITS_PER_POINT
+
+    # ------------------------------------------------------------------
+    # Per-stage data (re-)creation and active-stage access
+    # ------------------------------------------------------------------
+
+    def reset_stage_data(self):
+        """(Re-)create all per-stage lists sized to the current preset.
+
+        Called from __init__, the C (clear) handler, the W (preset cycle)
+        handler, and session.load_session.  Resets the active stage to 0 and
+        clears all encoded / derived / selected per-stage data.
+        """
+        n = self.n_stages
+        # Per-stage ENCODED data (each inner list holds 0 or 1 entries since
+        # there is exactly one point per stage).
+        self.stages_encoded_points = [[] for _ in range(n)]
+        self.stages_encoded_bits_chunks = [[] for _ in range(n)]
+        self.stages_encoded_steps = [[] for _ in range(n)]
+        self.stages_encoded_final_rects = [[] for _ in range(n)]
+        # Per-stage DERIVED params (element 0 is None — canonical).
+        self.stages_params = [None] * n
+        # Per-stage SELECTED (decode) data.
+        self.stages_selected_points = [[] for _ in range(n)]
+        self.stages_selected_steps = [[] for _ in range(n)]
+        self.stages_selected_final_rects = [[] for _ in range(n)]
+        self.stages_decoded_bits = [None] * n
+        # Active stage index (0-based; 0 = canonical d=2).
+        self.stage = 0
+        # Cumulative prior-point bits feeding the NEXT derivation.
+        self.argon2_stage1_bits = None
+
+    def active_params(self):
+        """(o, p, q) uint64 for the active stage (canonical if not derived)."""
+        if self.stage == 0 or self.stages_params[self.stage] is None:
+            return CANONICAL_O, CANONICAL_P, CANONICAL_Q
+        d = self.stages_params[self.stage]
+        return d["o"], d["p"], d["q"]
+
+    def cur_param_dict(self):
+        """The active stage's param dict (or None for canonical/not derived)."""
+        return self.stages_params[self.stage]
+
+    def cumulative_bits_before(self, stage_idx):
+        """Flat concatenation of the *encoded* chunks for all stages < stage_idx."""
+        bits = []
+        for s in range(stage_idx):
+            for chunk in self.stages_encoded_bits_chunks[s]:
+                bits.extend(chunk)
+        return bits
+
+    def cumulative_decoded_bits_before(self, stage_idx):
+        """Flat concatenation of the *decoded* bits for all stages < stage_idx."""
+        bits = []
+        for s in range(stage_idx):
+            if self.stages_decoded_bits[s] is not None:
+                bits.extend(self.stages_decoded_bits[s])
+        return bits
 
     @property
     def encoded_points(self):
-        """Return encoded points for the current stage."""
-        return self.stage2_encoded_points if self.stage == 2 else self.stage1_encoded_points
+        """Return encoded points for the active stage."""
+        return self.stages_encoded_points[self.stage]
 
     @encoded_points.setter
     def encoded_points(self, value):
-        if self.stage == 2:
-            self.stage2_encoded_points = value
-        else:
-            self.stage1_encoded_points = value
+        self.stages_encoded_points[self.stage] = value
 
     @property
     def encoded_bits_chunks(self):
-        return self.stage2_encoded_bits_chunks if self.stage == 2 else self.stage1_encoded_bits_chunks
+        return self.stages_encoded_bits_chunks[self.stage]
 
     @encoded_bits_chunks.setter
     def encoded_bits_chunks(self, value):
-        if self.stage == 2:
-            self.stage2_encoded_bits_chunks = value
-        else:
-            self.stage1_encoded_bits_chunks = value
+        self.stages_encoded_bits_chunks[self.stage] = value
 
     @property
     def encoded_steps(self):
-        return self.stage2_encoded_steps if self.stage == 2 else self.stage1_encoded_steps
+        return self.stages_encoded_steps[self.stage]
 
     @encoded_steps.setter
     def encoded_steps(self, value):
-        if self.stage == 2:
-            self.stage2_encoded_steps = value
-        else:
-            self.stage1_encoded_steps = value
+        self.stages_encoded_steps[self.stage] = value
 
     @property
     def encoded_final_rects(self):
-        return self.stage2_encoded_final_rects if self.stage == 2 else self.stage1_encoded_final_rects
+        return self.stages_encoded_final_rects[self.stage]
 
     @encoded_final_rects.setter
     def encoded_final_rects(self, value):
-        if self.stage == 2:
-            self.stage2_encoded_final_rects = value
-        else:
-            self.stage1_encoded_final_rects = value
+        self.stages_encoded_final_rects[self.stage] = value
+
+    # --- Compatibility shims for the per-parameter panel/debug/render code ---
+    # The unchanged panel/render/debug paths read state.stage2_o/p/q and the
+    # display floats.  Map these onto the ACTIVE stage's param dict so they
+    # transparently follow the active stage under the chained protocol.
+
+    def _active_param(self, key):
+        d = self.stages_params[self.stage] if self.stage != 0 else None
+        return d[key] if d is not None else None
+
+    @property
+    def stage2_o(self):    return self._active_param("o")
+    @property
+    def stage2_o_re(self): return self._active_param("o_re")
+    @property
+    def stage2_o_im(self): return self._active_param("o_im")
+    @property
+    def stage2_p(self):    return self._active_param("p")
+    @property
+    def stage2_p_re(self): return self._active_param("p_re")
+    @property
+    def stage2_p_im(self): return self._active_param("p_im")
+    @property
+    def stage2_q(self):    return self._active_param("q")
+    @property
+    def stage2_q_re(self): return self._active_param("q_re")
+    @property
+    def stage2_q_im(self): return self._active_param("q_im")
+
+    # --- Compatibility shims for the active stage's SELECTED (decode) data ---
+    @property
+    def selected_points(self):
+        return self.stages_selected_points[self.stage]
+
+    @selected_points.setter
+    def selected_points(self, value):
+        self.stages_selected_points[self.stage] = value
+
+    @property
+    def selected_steps(self):
+        return self.stages_selected_steps[self.stage]
+
+    @selected_steps.setter
+    def selected_steps(self, value):
+        self.stages_selected_steps[self.stage] = value
+
+    @property
+    def selected_final_rects(self):
+        return self.stages_selected_final_rects[self.stage]
+
+    @selected_final_rects.setter
+    def selected_final_rects(self, value):
+        self.stages_selected_final_rects[self.stage] = value
 
     def reset_view(self):
         self.center_re = DEFAULT_CENTER_RE
@@ -429,11 +569,9 @@ def render_fractal(state, block_size=1):
     step = state.pixel_step()
     origin_re, origin_im = state.viewport_origin()
 
-    # Always use the perturbed formula: stage 1 uses STAGE1_P (baseline),
-    # stage 2 uses the Argon2-derived stage2_p.
-    o_val = state.stage2_o if (state.stage == 2 and state.stage2_o is not None) else STAGE1_O
-    p_val = state.stage2_p if (state.stage == 2 and state.stage2_p is not None) else STAGE1_P
-    q_val = state.stage2_q if (state.stage == 2 and state.stage2_q is not None) else STAGE1_Q
+    # Always use the perturbed formula with the active stage's params: stage 0
+    # is canonical (o=p=q=0); every later stage uses its chain-derived (o,p,q).
+    o_val, p_val, q_val = state.active_params()
 
     if block_size <= 1:
         # Full resolution render
@@ -653,9 +791,7 @@ def apply_stretch_corrections(surface, state):
         exp_buf = np.zeros(exp_w * exp_h, dtype=np.uint8)
         exp_ptr = exp_buf.ctypes.data_as(ctypes.POINTER(ctypes.c_uint8))
 
-        o_val = state.stage2_o if (state.stage == 2 and state.stage2_o is not None) else STAGE1_O
-        p_val = state.stage2_p if (state.stage == 2 and state.stage2_p is not None) else STAGE1_P
-        q_val = state.stage2_q if (state.stage == 2 and state.stage2_q is not None) else STAGE1_Q
+        o_val, p_val, q_val = state.active_params()
 
         _lib.bs_render_viewport_generic(
             src_re_min, src_im_min, step,
@@ -729,13 +865,19 @@ DEPTH_COLORS = [
 
 
 def _all_selected_steps(state):
-    """Return the combined selected steps list (stage 1 + stage 2)."""
-    return state.selected_steps + state.stage2_selected_steps
+    """Return the combined selected steps list across all stages."""
+    out = []
+    for s in state.stages_selected_steps:
+        out += s
+    return out
 
 
 def _all_selected_final_rects(state):
-    """Return the combined selected final rects list (stage 1 + stage 2)."""
-    return state.selected_final_rects + state.stage2_selected_final_rects
+    """Return the combined selected final rects list across all stages."""
+    out = []
+    for s in state.stages_selected_final_rects:
+        out += s
+    return out
 
 
 def _area_total_steps(state):
@@ -1018,11 +1160,8 @@ def draw_panel(screen, state, font, small_font):
     pygame.draw.rect(screen, sel_bg, sel_rect)
     pygame.draw.rect(screen, (200, 100, 100) if state.select_mode else (70, 70, 90), sel_rect, 1)
     if state.select_mode:
-        if state.stage == 2:
-            n_filled = sum(1 for p in state.stage2_selected_points if p is not None)
-        else:
-            n_filled = sum(1 for p in state.selected_points if p is not None)
-        sel_label = f"Select {n_filled}/{state.points_per_stage}"
+        n_filled = sum(1 for p in state.selected_points if p is not None)
+        sel_label = f"Select {n_filled}/{state.points_per_stage} (stage {state.stage + 1}/{state.n_stages})"
     else:
         sel_label = "Select Pts"
     sel_txt = small_font.render(
@@ -1212,21 +1351,24 @@ def draw_panel(screen, state, font, small_font):
     # appended to each o/p/q hex input row below, using the unused
     # right-side space.
     y += 22
-    if state.stage == 2 and state.stage2_p is not None:
+    preset_label = (f"{state.size_preset} ({state.bip39_words} words / "
+                    f"{state.entropy_bits} bits / {state.n_stages} stages)")
+    cur = state.cur_param_dict()
+    if state.stage == 0:
         s2_txt = small_font.render(
-            "[Stage 2 ACTIVE]",
+            f"[Stage 1/{state.n_stages} canonical] {preset_label}  "
+            f"(W cycle preset, T next stage)",
+            True, (180, 180, 180),
+        )
+    elif cur is not None:
+        s2_txt = small_font.render(
+            f"[Stage {state.stage + 1}/{state.n_stages} ACTIVE]  {preset_label}",
             True, (140, 255, 140),
         )
-    elif state.stage2_p is not None:
-        s2_txt = small_font.render(
-            "[Stage 1] (Stage 2 ready, press T)",
-            True, (180, 220, 140),
-        )
     else:
-        preset_label = f"{state.size_preset} ({state.bip39_words} words /{state.entropy_bits} bits)"
         s2_txt = small_font.render(
-            f"[Stage 1] {preset_label}  (press W to cycle)",
-            True, (180, 180, 180),
+            f"[Stage {state.stage + 1}/{state.n_stages} not derived]  {preset_label}",
+            True, (180, 220, 140),
         )
     screen.blit(s2_txt, (x, y + 2))
 
@@ -1686,25 +1828,15 @@ def main():
                     elif event.key == pygame.K_r:
                         state.reset_view()
                     elif event.key == pygame.K_c:
-                        state.stage1_encoded_points = []
-                        state.stage1_encoded_bits_chunks = []
-                        state.stage1_encoded_steps = []
-                        state.stage1_encoded_final_rects = []
-                        state.stage2_encoded_points = []
-                        state.stage2_encoded_bits_chunks = []
-                        state.stage2_encoded_steps = []
-                        state.stage2_encoded_final_rects = []
+                        state.reset_stage_data()
                         state.selected_point_idx = None
                         state.selected_decoded_idx = None
                         if state.select_mode:
                             # Keep slot-based padding so clicks still target slots.
                             state.selected_points = [None] * state.points_per_stage
-                            state.stage2_selected_points = [None] * state.points_per_stage
                             state.select_active_idx = 0
-                        else:
-                            state.selected_points = []
-                            state.stage2_selected_points = []
                         state.decoded_mnemonic = ""
+                        state.argon2_digest = ""
                         state.highlighted_leaf_rect = None
                         state.needs_repalette = True
                         state.status_msg = "Cleared"
@@ -1714,7 +1846,7 @@ def main():
                         if state.select_mode and state.points_per_stage > 0:
                             state.select_active_idx = (
                                 (state.select_active_idx + 1) % state.points_per_stage)
-                            stage_lbl = "stage 2" if state.stage == 2 else "stage 1"
+                            stage_lbl = f"stage {state.stage + 1}/{state.n_stages}"
                             state.status_msg = (
                                 f"Click slot {state.select_active_idx + 1}/"
                                 f"{state.points_per_stage} ({stage_lbl}). "
@@ -1749,7 +1881,7 @@ def main():
                                 else:
                                     state.selected_decoded_idx = 0
                             if state.selected_point_idx is not None:
-                                point_offset = 0 if state.stage == 1 else state.points_per_stage
+                                point_offset = state.stage
                                 lbl = f"P{state.selected_point_idx + 1 + point_offset}"
                                 state.status_color = MARKER_COLORS[state.selected_point_idx % len(MARKER_COLORS)]
                             else:
@@ -1772,66 +1904,80 @@ def main():
                         state.status_msg = f"Debug mode {label}"
                         state.status_color = CLR_NEUTRAL
                     elif event.key == pygame.K_w:
-                        # Cycle size preset: mini → default → large → mini
+                        # Cycle size through every supported count, 3w..24w
+                        # (1..8 stages), wrapping back to 3w.
                         idx = SIZE_PRESET_ORDER.index(state.size_preset)
                         state.size_preset = SIZE_PRESET_ORDER[(idx + 1) % len(SIZE_PRESET_ORDER)]
+                        # n_stages just changed; rebuild all per-stage lists
+                        # sized to the new preset and reset to stage 0.
+                        state.reset_stage_data()
+                        state.selected_point_idx = None
+                        state.selected_decoded_idx = None
+                        state.decoded_mnemonic = ""
+                        state.argon2_digest = ""
+                        cache_clear_stage2()
                         if state.select_mode:
-                            # points_per_stage just changed; resize the
-                            # in-progress slot list to match the new size and
-                            # restart from slot 0. Otherwise select_active_idx
-                            # can outrun the stale list length and the next
-                            # click crashes with IndexError on the write.
-                            if state.stage == 2:
-                                state.stage2_selected_points = [None] * state.points_per_stage
-                            else:
-                                state.selected_points = [None] * state.points_per_stage
+                            # Restart slot entry from slot 0 on the new stage 0.
+                            state.selected_points = [None] * state.points_per_stage
                             state.select_active_idx = 0
                         state.status_msg = (f"Size: {state.size_preset} "
                             f"({state.bip39_words} words, {state.entropy_bits} bits, "
-                            f"{state.points_per_stage} points/stage)")
+                            f"{state.n_stages} stages)")
                         state.status_color = CLR_NEUTRAL
+                        state.needs_redraw = True
                     elif event.key == pygame.K_s:
                         state.select_mode = not state.select_mode
                         if state.select_mode:
+                            # Start decoding from stage 0 (the canonical fractal).
+                            state.stage = 0
+                            cache_clear_stage2()
                             state.select_active_idx = 0
-                            if state.stage == 2:
-                                state.stage2_selected_points = [None] * state.points_per_stage
-                                state.status_msg = (
-                                    f"Click slot 1/{state.points_per_stage} (stage 2). "
-                                    f"N=cycle slot, click=set/overwrite.")
-                            else:
-                                state.selected_points = [None] * state.points_per_stage
-                                state.status_msg = (
-                                    f"Click slot 1/{state.points_per_stage} (stage 1). "
-                                    f"N=cycle slot, click=set/overwrite.")
+                            state.selected_points = [None] * state.points_per_stage
+                            state.status_msg = (
+                                f"Click slot 1/{state.points_per_stage} "
+                                f"(stage 1/{state.n_stages}). "
+                                f"N=cycle slot, click=set/overwrite.")
                             state.status_color = CLR_WARNING
+                            state.needs_redraw = True
                         else:
                             state.status_msg = "Select mode off"
                             state.status_color = CLR_NEUTRAL
                     elif event.key == pygame.K_t:
-                        if state.stage == 1 and state.stage2_p is not None:
-                            state.stage = 2
-                            if state.debug_mode:
-                                q_msg = ""
-                                if state.stage2_q is not None:
-                                    q_msg = f"  Re(q)={state.stage2_q_re:.6f} Im(q)={state.stage2_q_im:.6f}"
-                                state.status_msg = (
-                                    f"Stage 2  "
-                                    f"Re(o)={state.stage2_o_re:.6f} Im(o)={state.stage2_o_im:.6f}"
-                                    f"  Re(p)={state.stage2_p_re:.6f} Im(p)={state.stage2_p_im:.6f}"
-                                    f"{q_msg}")
-                            else:
-                                state.status_msg = "Stage 2"
-                            state.status_color = CLR_STAGE_RDY
-                            state.needs_redraw = True
-                        elif state.stage == 2:
-                            state.stage = 1
-                            state.status_msg = "Stage 1 (d=2)"
-                            state.status_color = CLR_NEUTRAL
-                            state.needs_redraw = True
-                        else:
-                            state.status_msg = "Stage 2 unavailable (run Argon2 first)"
+                        # Advance to the next AVAILABLE stage, wrapping to 0.
+                        # Stage 0 is always available; stage k>0 is available
+                        # iff its fractal params have been derived.
+                        def _stage_available(k):
+                            return k == 0 or state.stages_params[k] is not None
+                        n = state.n_stages
+                        nxt = None
+                        for off in range(1, n + 1):
+                            cand = (state.stage + off) % n
+                            if _stage_available(cand):
+                                nxt = cand
+                                break
+                        if nxt is None or nxt == state.stage:
+                            state.status_msg = (
+                                f"No other derived stage available "
+                                f"(stage {state.stage + 1}/{n}). Run Argon2 to derive the next.")
                             state.status_color = CLR_WARNING
+                        else:
+                            state.stage = nxt
+                            cache_clear_stage2()
+                            cur = state.cur_param_dict()
+                            if state.stage == 0:
+                                state.status_msg = f"Stage 1/{n} (canonical d=2)"
+                                state.status_color = CLR_NEUTRAL
+                            elif state.debug_mode and cur is not None:
+                                state.status_msg = (
+                                    f"Stage {state.stage + 1}/{n}  "
+                                    f"Re(o)={cur['o_re']:.6f} Im(o)={cur['o_im']:.6f}"
+                                    f"  Re(p)={cur['p_re']:.6f} Im(p)={cur['p_im']:.6f}"
+                                    f"  Re(q)={cur['q_re']:.6f} Im(q)={cur['q_im']:.6f}")
+                                state.status_color = CLR_STAGE_RDY
+                            else:
+                                state.status_msg = f"Stage {state.stage + 1}/{n}"
+                                state.status_color = CLR_STAGE_RDY
+                            state.needs_redraw = True
                     elif event.key == pygame.K_v:
                         # V is the universal "show / hide all area rectangles"
                         # toggle.  Areas are drawn whenever ANY of show_areas,
@@ -1989,7 +2135,7 @@ def main():
                             run_random_encode(state)
                     elif event.key == pygame.K_F6:
                         # Save session to JSON
-                        if state.stage1_encoded_points:
+                        if state.stages_encoded_points[0]:
                             import time as _time
                             ts = _time.strftime("%Y%m%d_%H%M%S")
                             fname = f"bs_session_{ts}.json"
@@ -2026,53 +2172,18 @@ def main():
                 if my >= state.vp_h:
                     if hasattr(state, '_encode_btn_rect') and state._encode_btn_rect.collidepoint(mx, my):
                         try:
-                            if state.stage == 2:
-                                pts, chunks, steps, frects = encode_bip39_stage2(
-                                    state.input_text, state.stage2_o, state.stage2_p,
-                                    state.stage2_q, num_points=state.points_per_stage)
-                                state.stage2_encoded_points = pts
-                                state.stage2_encoded_bits_chunks = chunks
-                                state.stage2_encoded_steps = steps
-                                state.stage2_encoded_final_rects = frects
-                                state.selected_point_idx = None
-                                state.selected_decoded_idx = None
-                                state.needs_redraw = True
-                                state.status_msg = f"Encoded {state.points_per_stage} points ({state.bits_per_stage} bits, stage 2)"
-                                state.status_color = CLR_SUCCESS
+                            # Encode the full mnemonic into ALL stages via the
+                            # memory-hard chain (synchronous; may be slow for
+                            # iters>0, matching the protocol).
+                            encode_full_mnemonic(state)
+                            n = state.n_stages
+                            if state.debug_mode:
+                                state.status_msg = (
+                                    f"Encoded {n} stages ({state.entropy_bits} bits) "
+                                    f"[{state.argon2_marker}]  T to walk stages")
                             else:
-                                pts, chunks, steps, frects = encode_bip39(state.input_text,
-                                    num_points=state.points_per_stage)
-                                state.stage1_encoded_points = pts
-                                state.stage1_encoded_bits_chunks = chunks
-                                state.stage1_encoded_steps = steps
-                                state.stage1_encoded_final_rects = frects
-                                state.selected_point_idx = None
-                                state.selected_decoded_idx = None
-                                stage1 = []
-                                for c in chunks:
-                                    stage1.extend(c)
-                                state.argon2_stage1_bits = stage1
-                                state.argon2_digest = ""
-                                state.needs_redraw = True
-                                # Auto-chain: if iterations field has a valid number, run Argon2
-                                try:
-                                    iters = int(state.argon2_iterations)
-                                    if iters < 0:
-                                        raise ValueError
-                                except ValueError:
-                                    iters = None
-                                if iters is not None and iters >= 0:
-                                    state.argon2_running = True
-                                    state.argon2_digest = ""
-                                    state.argon2_progress = 0
-                                    state.argon2_progress_total = max(iters, 1)
-                                    prof_label = {PROFILE_BASIC: "Basic", PROFILE_ADVANCED: "Advanced", PROFILE_GREAT_WALL: "Great Wall"}.get(state.argon2_profile, "Basic")
-                                    state.status_msg = f"Encoded → Argon2 {prof_label} (x{iters})..."
-                                    state.status_color = CLR_PENDING
-                                    run_argon2_iterative(state, iters)
-                                else:
-                                    state.status_msg = f"Encoded {state.points_per_stage} points ({state.bits_per_stage} bits, stage 1)"
-                                    state.status_color = CLR_SUCCESS
+                                state.status_msg = f"Encoded {n} stages ({state.entropy_bits} bits)"
+                            state.status_color = CLR_SUCCESS
                         except ValueError as e:
                             state.status_msg = f"Error: {e}"
                             state.status_color = CLR_ERROR
@@ -2152,46 +2263,29 @@ def main():
                     elif hasattr(state, '_select_btn_rect') and state._select_btn_rect.collidepoint(mx, my):
                         state.select_mode = not state.select_mode
                         if state.select_mode:
+                            # Start decoding from stage 0 (the canonical fractal).
+                            state.stage = 0
+                            cache_clear_stage2()
                             state.select_active_idx = 0
-                            if state.stage == 2:
-                                state.stage2_selected_points = [None] * state.points_per_stage
-                                state.status_msg = (
-                                    f"Click slot 1/{state.points_per_stage} (stage 2). "
-                                    f"N=cycle slot, click=set/overwrite.")
-                            else:
-                                state.selected_points = [None] * state.points_per_stage
-                                state.status_msg = (
-                                    f"Click slot 1/{state.points_per_stage} (stage 1). "
-                                    f"N=cycle slot, click=set/overwrite.")
+                            state.selected_points = [None] * state.points_per_stage
+                            state.status_msg = (
+                                f"Click slot 1/{state.points_per_stage} "
+                                f"(stage 1/{state.n_stages}). "
+                                f"N=cycle slot, click=set/overwrite.")
                             state.status_color = CLR_WARNING
+                            state.needs_redraw = True
                         else:
                             state.status_msg = "Select mode off"
                             state.status_color = CLR_NEUTRAL
                     elif hasattr(state, '_clear_btn_rect') and state._clear_btn_rect.collidepoint(mx, my):
-                        state.stage1_encoded_points = []
-                        state.stage1_encoded_bits_chunks = []
-                        state.stage1_encoded_steps = []
-                        state.stage1_encoded_final_rects = []
-                        state.stage2_encoded_points = []
-                        state.stage2_encoded_bits_chunks = []
-                        state.stage2_encoded_steps = []
-                        state.stage2_encoded_final_rects = []
+                        state.reset_stage_data()
                         state.selected_point_idx = None
                         state.selected_decoded_idx = None
                         if state.select_mode:
                             state.selected_points = [None] * state.points_per_stage
-                            state.stage2_selected_points = [None] * state.points_per_stage
                             state.select_active_idx = 0
-                        else:
-                            state.selected_points = []
-                            state.stage2_selected_points = []
-                        state.selected_steps = []
-                        state.selected_final_rects = []
-                        state.stage2_selected_steps = []
-                        state.stage2_selected_final_rects = []
                         state.decoded_mnemonic = ""
-                        state.decoded_stage1_bits = None
-                        state.decoded_stage2_bits = None
+                        state.argon2_digest = ""
                         state.area_focus_step = None
                         state.highlighted_leaf_rect = None
                         state.needs_repalette = True
@@ -2280,19 +2374,19 @@ def main():
                             o_re, o_im = decode_o_display(o)
                             p_re, p_im = decode_p_display(p)
                             q_re, q_im = decode_q_display(q)
-                            state.stage2_o = o
-                            state.stage2_o_re = o_re
-                            state.stage2_o_im = o_im
-                            state.stage2_p = p
-                            state.stage2_p_re = p_re
-                            state.stage2_p_im = p_im
-                            state.stage2_q = q
-                            state.stage2_q_re = q_re
-                            state.stage2_q_im = q_im
+                            # Apply the manual (o,p,q) to the next stage after the
+                            # active one (or stage 1 if currently on canonical 0),
+                            # and make it active.
+                            target = state.stage + 1 if state.stage + 1 < state.n_stages else state.stage
+                            if target == 0:
+                                target = min(1, state.n_stages - 1)
+                            state.stages_params[target] = params_dict_from_tuple(
+                                (o, o_re, o_im, p, p_re, p_im, q, q_re, q_im))
                             cache_clear_stage2()
-                            state.stage = 2
+                            state.stage = target
                             state.needs_redraw = True
-                            state.status_msg = f"Debug → Stage 2  o=0x{o:016X}  p=0x{p:016X}  q=0x{q:016X}"
+                            state.status_msg = (f"Debug → Stage {target + 1}/{state.n_stages}  "
+                                                f"o=0x{o:016X}  p=0x{p:016X}  q=0x{q:016X}")
                             state.status_color = CLR_STAGE_ACT
                         except ValueError as e:
                             state.status_msg = f"Invalid hex: {e}"
@@ -2389,7 +2483,7 @@ def main():
                         if best_idx is not None:
                             state.selected_point_idx = best_idx
                             state.selected_decoded_idx = None
-                            p_label = best_idx + 1 + (0 if state.stage == 1 else state.points_per_stage)
+                            p_label = best_idx + 1 + state.stage
                             state.status_msg = f"Selected P{p_label} — N/P to cycle"
                             state.status_color = MARKER_COLORS[best_idx % len(MARKER_COLORS)]
                             continue
@@ -2414,8 +2508,8 @@ def main():
                             state.status_color = MARKER_COLORS[best_idx % len(MARKER_COLORS)]
                             continue
 
-                    if state.select_mode and state.stage == 1:
-                        # --- Stage-1 select-points flow (slot-based) ---
+                    if state.select_mode:
+                        # --- Chained per-stage select-points flow (1 slot/stage) ---
                         # Defensive resync: if anything (a stale code path, a
                         # session load, an unusual key sequence) left the slot
                         # list out of sync with points_per_stage, snap back to
@@ -2429,11 +2523,12 @@ def main():
                         re = fixed_to_f64(re_raw)
                         im = fixed_to_f64(im_raw)
 
+                        o_val, p_val, q_val = state.active_params()
                         try:
                             _bits, leaf_rect, valid, _sel_path = decode_full(
                                 re_raw, im_raw, BITS_PER_POINT,
                                 area=ENCODE_AREA, params=GUI_PARAMS,
-                                o=STAGE1_O, p=STAGE1_P, q=STAGE1_Q,
+                                o=o_val, p=p_val, q=q_val,
                                 path_prefix="O",
                             )
                         except Exception as e:
@@ -2461,110 +2556,72 @@ def main():
                                     state.select_active_idx = cand
                                     break
                             else:
-                                # All slots filled — leave active_idx at slot
-                                # (auto-decode below will exit select_mode).
                                 pass
                             n_filled = sum(1 for p in state.selected_points if p is not None)
                             state.status_msg = (
                                 f"Slot {slot + 1} set ({n_filled}/{state.points_per_stage} filled) "
-                                f"at ({re:.6f}, {im:.6f}). N=cycle, click=overwrite.")
+                                f"at ({re:.6f}, {im:.6f}) (stage {state.stage + 1}/{state.n_stages}). "
+                                f"N=cycle, click=overwrite.")
                             state.status_color = CLR_WARNING
                             state.highlighted_leaf_rect = leaf_rect
                             state.needs_repalette = True
 
+                        # Stage's single point complete → decode its 32 bits and
+                        # walk the chain to the next stage.
                         if all(p is not None for p in state.selected_points) \
                                 and len(state.selected_points) == state.points_per_stage:
                             try:
-                                state.selected_points = list(state.selected_points)
-                                stage1_bits, s1_steps, s1_rects = decode_points(
-                                    state.selected_points, p=STAGE1_P)
-                                state.decoded_stage1_bits = stage1_bits
-                                state.argon2_stage1_bits = stage1_bits
+                                stage_bits, st_steps, st_rects = decode_points(
+                                    state.selected_points,
+                                    o=o_val, p=p_val, q=q_val)
+                                cur = state.stage
+                                state.stages_decoded_bits[cur] = stage_bits
+                                state.selected_steps = st_steps
+                                state.selected_final_rects = st_rects
                                 state.argon2_digest = ""
-                                stage1_hex = bits_to_hex(stage1_bits)
-                                state.decoded_mnemonic = f"[stage 1: {stage1_hex}]"
-                                state.selected_steps = s1_steps
-                                state.selected_final_rects = s1_rects
-                                state.status_msg = f"Decoded {state.points_per_stage} pts → {state.bits_per_stage} bits (stage 1). Run Argon2 → stage 2."
-                                state.status_color = CLR_SUCCESS
-                                state.select_mode = False
-                            except Exception as e:
-                                state.status_msg = f"Decode error: {e}"
-                                state.status_color = CLR_ERROR
-                                state.select_mode = False
 
-                    elif state.select_mode and state.stage == 2:
-                        # --- Stage-2 select-points flow (slot-based) ---
-                        # Same defensive resync as in the stage-1 branch.
-                        if len(state.stage2_selected_points) != state.points_per_stage:
-                            state.stage2_selected_points = [None] * state.points_per_stage
-                            state.select_active_idx = 0
-                        elif not (0 <= state.select_active_idx < state.points_per_stage):
-                            state.select_active_idx = 0
-                        re_raw, im_raw = state.screen_to_complex_fixed(mx, my)
-                        re = fixed_to_f64(re_raw)
-                        im = fixed_to_f64(im_raw)
-
-                        try:
-                            _bits, leaf_rect, valid, _sel_path = decode_full(
-                                re_raw, im_raw, BITS_PER_POINT,
-                                area=ENCODE_AREA, params=GUI_PARAMS,
-                                o=state.stage2_o, p=state.stage2_p, q=state.stage2_q,
-                                path_prefix="O",
-                            )
-                        except Exception as e:
-                            state.status_msg = f"Decode error: {e}"
-                            state.status_color = CLR_ERROR
-                            valid = False
-
-                        if not valid:
-                            state.highlighted_leaf_rect = None
-                            state.needs_repalette = True
-                            if state.status_color != CLR_ERROR:
-                                state.status_msg = (
-                                    f"Bad point at ({re:.6f}, {im:.6f}) — "
-                                    f"excluded by contraction. Slot {state.select_active_idx + 1} "
-                                    f"unchanged; click again or press N to cycle.")
-                                state.status_color = CLR_ERROR
-                        else:
-                            slot = state.select_active_idx
-                            state.stage2_selected_points[slot] = (re_raw, im_raw)
-                            for off in range(1, state.points_per_stage + 1):
-                                cand = (slot + off) % state.points_per_stage
-                                if state.stage2_selected_points[cand] is None:
-                                    state.select_active_idx = cand
-                                    break
-                            else:
-                                pass
-                            n_filled = sum(1 for p in state.stage2_selected_points if p is not None)
-                            state.status_msg = (
-                                f"Slot {slot + 1} set ({n_filled}/{state.points_per_stage} filled) "
-                                f"at ({re:.6f}, {im:.6f}) (stage 2). N=cycle, click=overwrite.")
-                            state.status_color = CLR_WARNING
-                            state.highlighted_leaf_rect = leaf_rect
-                            state.needs_repalette = True
-
-                        if all(p is not None for p in state.stage2_selected_points) \
-                                and len(state.stage2_selected_points) == state.points_per_stage:
-                            try:
-                                stage2_bits, s2_steps, s2_rects = decode_points(
-                                    state.stage2_selected_points, o=state.stage2_o, p=state.stage2_p, q=state.stage2_q)
-                                state.decoded_stage2_bits = stage2_bits
-                                stage2_hex = bits_to_hex(stage2_bits)
-                                state.stage2_selected_steps = s2_steps
-                                state.stage2_selected_final_rects = s2_rects
-                                # Combine stage1 + stage2 → 128 entropy bits → BIP39
-                                if state.decoded_stage1_bits is not None:
-                                    all_entropy = state.decoded_stage1_bits + stage2_bits
-                                    mnemonic = bits_to_mnemonic(all_entropy)
-                                    state.decoded_mnemonic = mnemonic
-                                    state.status_msg = f"Decoded all {state.points_per_stage * 2} pts → {state.entropy_bits} bits → BIP39 mnemonic"
-                                    state.status_color = CLR_SUCCESS
+                                if cur + 1 >= state.n_stages:
+                                    # Last stage decoded — assemble full entropy.
+                                    all_entropy = []
+                                    for s in range(state.n_stages):
+                                        all_entropy.extend(state.stages_decoded_bits[s] or [])
+                                    if len(all_entropy) == state.entropy_bits:
+                                        mnemonic = bits_to_mnemonic(all_entropy)
+                                        state.decoded_mnemonic = mnemonic
+                                        state.status_msg = (
+                                            f"Decoded all {state.n_stages} stages → "
+                                            f"{state.entropy_bits} bits → BIP39 mnemonic")
+                                        state.status_color = CLR_SUCCESS
+                                    else:
+                                        state.decoded_mnemonic = (
+                                            f"[{bits_to_hex(all_entropy)}] (incomplete)")
+                                        state.status_msg = "Decoded (incomplete entropy)"
+                                        state.status_color = CLR_WARNING
+                                    state.select_mode = False
                                 else:
-                                    state.decoded_mnemonic = f"[stage 2: {stage2_hex}] (stage 1 missing)"
-                                    state.status_msg = f"Decoded {state.points_per_stage} pts → {state.bits_per_stage} bits (stage 2)"
-                                    state.status_color = CLR_SUCCESS
-                                state.select_mode = False
+                                    # Derive the NEXT stage's fractal from the
+                                    # cumulative decoded bits, then advance to it.
+                                    prior_bits = state.cumulative_decoded_bits_before(cur + 1)
+                                    state.argon2_stage1_bits = prior_bits
+                                    try:
+                                        iters = int(state.argon2_iterations)
+                                        if iters < 0:
+                                            raise ValueError
+                                    except ValueError:
+                                        iters = 0
+                                    o2, p2, q2, _dg, params = protocol.stage_params(
+                                        cur + 1, prior_bits, state.argon2_profile, iters)
+                                    state.stages_params[cur + 1] = params_dict_from_tuple(params)
+                                    state.stage = cur + 1
+                                    cache_clear_stage2()
+                                    state.select_active_idx = 0
+                                    state.selected_points = [None] * state.points_per_stage
+                                    state.status_msg = (
+                                        f"Stage {cur + 1}/{state.n_stages} decoded → "
+                                        f"derived stage {cur + 2}/{state.n_stages}. "
+                                        f"Click its point.")
+                                    state.status_color = CLR_ADVANCE
+                                    state.needs_redraw = True
                             except Exception as e:
                                 state.status_msg = f"Decode error: {e}"
                                 state.status_color = CLR_ERROR
@@ -2656,8 +2713,8 @@ def main():
                 draw_bisect_rects(screen, state, steps_data, frect, pt_color,
                                   focus_step=local_focus)
 
-        # Draw encoded points (stage-aware: P1,P2 for stage 1; P3,P4 for stage 2)
-        point_offset = 0 if state.stage == 1 else state.points_per_stage
+        # Draw encoded points for the ACTIVE stage (labelled by stage number).
+        point_offset = state.stage
         for i, (re, im, re_raw, im_raw) in enumerate(state.encoded_points):
             sx, sy = state.complex_to_screen(re, im)
             if 0 <= sx < state.vp_w and 0 <= sy < state.vp_h:
@@ -2666,35 +2723,25 @@ def main():
                 label = f"P{i + 1 + point_offset}" + (" *" if selected else "")
                 draw_marker(screen, sx, sy, color, label, small_font)
 
-        # Draw selected points (stage 1 and stage 2).  In select mode the
-        # lists may contain None for unfilled slots — skip those.
-        for i, p in enumerate(state.selected_points):
-            if p is None:
-                continue
-            re_raw, im_raw = p
-            re = fixed_to_f64(re_raw)
-            im = fixed_to_f64(im_raw)
-            sx, sy = state.complex_to_screen(re, im)
-            if 0 <= sx < state.vp_w and 0 <= sy < state.vp_h:
-                color = MARKER_COLORS[i % len(MARKER_COLORS)]
-                selected = (i == state.selected_decoded_idx)
-                active_slot = (state.select_mode and state.stage == 1
-                               and i == state.select_active_idx)
-                label = f"S{i+1}" + (" *" if selected else "") + (" ←" if active_slot else "")
-                draw_marker(screen, sx, sy, color, label, small_font)
-        for i, p in enumerate(state.stage2_selected_points):
-            if p is None:
-                continue
-            re_raw, im_raw = p
-            re = fixed_to_f64(re_raw)
-            im = fixed_to_f64(im_raw)
-            sx, sy = state.complex_to_screen(re, im)
-            if 0 <= sx < state.vp_w and 0 <= sy < state.vp_h:
-                color = MARKER_COLORS[(i + state.points_per_stage) % len(MARKER_COLORS)]
-                active_slot = (state.select_mode and state.stage == 2
-                               and i == state.select_active_idx)
-                label = f"S{i + 1 + state.points_per_stage}" + (" ←" if active_slot else "")
-                draw_marker(screen, sx, sy, color, label, small_font)
+        # Draw selected (decoded) points across ALL stages.  In select mode the
+        # active stage's slot list may contain None for unfilled slots — skip
+        # those.  Markers are labelled S{stage} and the active slot gets "←".
+        for st in range(state.n_stages):
+            for i, p in enumerate(state.stages_selected_points[st]):
+                if p is None:
+                    continue
+                re_raw, im_raw = p
+                re = fixed_to_f64(re_raw)
+                im = fixed_to_f64(im_raw)
+                sx, sy = state.complex_to_screen(re, im)
+                if 0 <= sx < state.vp_w and 0 <= sy < state.vp_h:
+                    color = MARKER_COLORS[st % len(MARKER_COLORS)]
+                    selected = (st == state.stage and i == state.selected_decoded_idx)
+                    active_slot = (state.select_mode and st == state.stage
+                                   and i == state.select_active_idx)
+                    label = (f"S{st + 1}" + (" *" if selected else "")
+                             + (" ←" if active_slot else ""))
+                    draw_marker(screen, sx, sy, color, label, small_font)
 
         # Draw panel
         draw_panel(screen, state, font, small_font)

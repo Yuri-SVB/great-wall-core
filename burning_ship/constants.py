@@ -92,11 +92,18 @@ Q_SIGN_BIT_RE = 31
 Q_SIGN_BIT_IM = 63
 Q_MAGNITUDE_MIN_EXP = 5
 
-# Stage-1 fixed parameters: all three set to 0 yields the canonical
-# Burning Ship formula (z₀=0, no additive shift, no linear term).
+# Canonical (first-stage) fixed parameters: all three set to 0 yields the
+# canonical Burning Ship formula (z₀=0, no additive shift, no linear term).
+# The first stage of the chain is always this public, canonical fractal — it
+# is not a secret haystack the attacker must find.  Names are kept as
+# STAGE1_* (the first, 1-indexed stage) for continuity with the rest of the
+# code; CANONICAL_* aliases are provided for clarity.
 STAGE1_O = 0   # o=0 ⇒ orbit seed z₀ = 0
 STAGE1_P = 0   # p=0 ⇒ additive shift only the baseline (+1/8, +1/8)
 STAGE1_Q = 0   # q=0 ⇒ no εz term
+CANONICAL_O = STAGE1_O
+CANONICAL_P = STAGE1_P
+CANONICAL_Q = STAGE1_Q
 
 # ---------------------------------------------------------------------------
 # Argon2
@@ -132,17 +139,62 @@ CONTRACTION_DIVISOR = 4
 
 BITS_PER_POINT = 32
 
-SIZE_PRESETS = {
-    "mini":    {"points_per_stage": 1, "entropy_bits":  64, "bip39_words":  6},
-    "default": {"points_per_stage": 2, "entropy_bits": 128, "bip39_words": 12},
-    "large":   {"points_per_stage": 4, "entropy_bits": 256, "bip39_words": 24},
-}
-SIZE_PRESET_ORDER = ["mini", "default", "large"]
-INITIAL_SIZE_PRESET = "default"
+# Protocol geometry: exactly ONE 32-bit point (one needle) per stage, and
+# each stage is its own fractal (one haystack).  The number of stages is
+# therefore entropy_bits / BITS_PER_POINT.  The first stage is the canonical
+# Burning Ship (o=p=q=0); every later stage's fractal is derived by hashing
+# all preceding points through the memory-hard chain (Argon2 → SHA-256 →
+# (o,p,q)).  So an N-stage secret has 1 canonical fractal and N−1 secret,
+# chain-derived fractals.
+#
+# Because n_stages = entropy_bits / 32 = words / 3, every BIP39 size that is a
+# multiple of 32 entropy bits falls out uniformly — one extra stage per extra
+# 32 bits (3 words).  We expose all of them, from 32 bits (3 words, 1 stage) up
+# to a HARD CAP of 256 bits (24 words, 8 stages).  Going beyond 256 is allowed
+# in theory but deliberately NOT offered: one more stage is the same marginal
+# mental effort for diminishing returns, so the better lever past 24 words is
+# more between-stage Argon2 iterations, not more stages.  (Future: a user with a
+# specific reason could chain multiple setups via an "advanced pepper" field —
+# pepper = a prior setup's result.  See great-wall-docs next-steps; revisit.)
+#
+# Tiers: 32/64/96 bits are "sub-standard" (below BIP39's 128-bit floor — weak,
+# offered for completeness); 128..256 are the "standard" BIP39 sizes.
+MAX_ENTROPY_BITS = 256                 # hard cap (24 words, 8 stages)
+MIN_ENTROPY_BITS = BITS_PER_POINT      # 32 bits (3 words, 1 stage)
 
-# Derived from initial preset (kept as module-level for backward compat)
-STAGE1_NUM_POINTS = SIZE_PRESETS[INITIAL_SIZE_PRESET]["points_per_stage"]
-STAGE2_NUM_POINTS = SIZE_PRESETS[INITIAL_SIZE_PRESET]["points_per_stage"]
+
+def _build_size_presets():
+    """Build the full set of presets (one per 32-bit step up to the cap).
+
+    Keyed by word count, e.g. "12w".  word_count = 3 * n_stages, and
+    entropy_bits = 32 * n_stages.
+    """
+    presets = {}
+    order = []
+    for bits in range(MIN_ENTROPY_BITS, MAX_ENTROPY_BITS + 1, BITS_PER_POINT):
+        n_stages = bits // BITS_PER_POINT
+        words = 3 * n_stages
+        key = f"{words}w"
+        presets[key] = {
+            "n_stages": n_stages,
+            "entropy_bits": bits,
+            "bip39_words": words,
+            "tier": "standard" if bits >= 128 else "sub-standard",
+        }
+        order.append(key)
+    return presets, order
+
+
+SIZE_PRESETS, SIZE_PRESET_ORDER = _build_size_presets()
+INITIAL_SIZE_PRESET = "12w"            # 128-bit / 12-word default
+
+# Back-compat aliases for the three originally-named presets.
+SIZE_PRESET_ALIASES = {"mini": "6w", "default": "12w", "large": "24w"}
+
+
+def n_stages_for(entropy_bits):
+    """Number of stages (= one point each) for a given entropy-bit count."""
+    return entropy_bits // BITS_PER_POINT
 
 # Encoding area: the BS region where island density supports 32-bit encoding
 ENCODE_AREA = Rect.from_f64(-2.5, 1.5, -2.0, 1.5)

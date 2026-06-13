@@ -42,40 +42,61 @@ BIP39 = {
     ("l", "abandon"): "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art",
 }
 
-ITERATIONS = [0, 1, 2, 3]
+# One 32-bit point per stage means each Argon2 iteration is now run once per
+# *secret* stage (n_stages-1 chained derivations), so iters>0 vectors are
+# expensive — especially default (3 links) and large (7 links).  We therefore
+# freeze the full breadth at iter0 (instant identity derivation, which still
+# exercises the chain: each secret stage gets distinct params from the growing
+# prior-point prefix) and add only a few cheap real-Argon2 vectors so the meta
+# tests have iter1/iter2 inputs.  iter0 is generated for every (mode, seed);
+# EXTRA_ITER lists the additional (mode, seed, iters) real-Argon2 vectors.
+# Kept deliberately small — the committed set ships one cheap mini iter1 vector
+# so the meta tests have an iter1 input.  Add more here (e.g. ("d","zeros",1),
+# ("m","zeros",2)) to widen real-Argon2 coverage; note each is ~iters*(stages-1)
+# Argon2 passes at the Basic 1 GiB profile and the frozen test re-encodes them.
+EXTRA_ITER = [
+    ("m", "zeros", 1),
+]
 
 os.makedirs(OUT_DIR, exist_ok=True)
 
 mode_names = {"m": "mini", "d": "default", "l": "large"}
-total = 0
+
+# Build the (mode, seed, iters) work list: iter0 for all, plus the extras.
+work = []
 for mode, seeds in MODES.items():
-    for seed_name, entropy_hex in seeds.items():
-        for iters in ITERATIONS:
-            fname = f"{mode_names[mode]}_{seed_name}_iter{iters}.json"
-            path = os.path.join(OUT_DIR, fname)
-            if os.path.exists(path):
-                print(f"  SKIP  {fname} (exists)")
-                total += 1
-                continue
-            if entropy_hex is not None:
-                cmd = [sys.executable, CLI, "encode",
-                       "--entropy", entropy_hex,
-                       "--profile", "b", "--iterations", str(iters), "--mode", mode]
-            else:
-                bip39 = BIP39.get((mode, seed_name))
-                if bip39 is None:
-                    continue
-                cmd = [sys.executable, CLI, "encode",
-                       "--bip39", bip39,
-                       "--profile", "b", "--iterations", str(iters), "--mode", mode]
-            print(f"  GEN   {fname} ...", end="", flush=True)
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
-            if result.returncode != 0:
-                print(f" FAIL: {result.stderr.strip()}")
-                continue
-            with open(path, "w") as f:
-                f.write(result.stdout)
-            print(" OK")
-            total += 1
+    for seed_name in seeds:
+        work.append((mode, seed_name, 0))
+work.extend(EXTRA_ITER)
+
+total = 0
+for mode, seed_name, iters in work:
+    entropy_hex = MODES[mode][seed_name]
+    fname = f"{mode_names[mode]}_{seed_name}_iter{iters}.json"
+    path = os.path.join(OUT_DIR, fname)
+    if os.path.exists(path):
+        print(f"  SKIP  {fname} (exists)")
+        total += 1
+        continue
+    if entropy_hex is not None:
+        cmd = [sys.executable, CLI, "encode",
+               "--entropy", entropy_hex,
+               "--profile", "b", "--iterations", str(iters), "--mode", mode]
+    else:
+        bip39 = BIP39.get((mode, seed_name))
+        if bip39 is None:
+            continue
+        cmd = [sys.executable, CLI, "encode",
+               "--bip39", bip39,
+               "--profile", "b", "--iterations", str(iters), "--mode", mode]
+    print(f"  GEN   {fname} ...", end="", flush=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+    if result.returncode != 0:
+        print(f" FAIL: {result.stderr.strip()}")
+        continue
+    with open(path, "w") as f:
+        f.write(result.stdout)
+    print(" OK")
+    total += 1
 
 print(f"\nTotal vectors: {total}")

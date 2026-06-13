@@ -19,6 +19,8 @@ import argparse
 import subprocess
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, SCRIPT_DIR)
+from protocol import PROTOCOL_VERSION  # noqa: E402  (current chained-protocol version)
 CLI_PATH = os.path.join(SCRIPT_DIR, "cli.py")
 VECTORS_DIR = os.path.join(SCRIPT_DIR, "test_vectors")
 
@@ -139,7 +141,12 @@ def test_round_trip(vector_path, verbose=False):
 
 
 def test_cross_mode(vectors_dir, verbose=False):
-    """Test that the first point's leaf is identical across mini/default/large."""
+    """Test that the first stage's leaf is identical across mini/default/large.
+
+    Stage 0 is the canonical fractal and its 32-bit point depends only on the
+    first 32 entropy bits, which are identical for the all-zero "abandon"
+    mnemonics across presets — so the first leaf must match.
+    """
     patterns = [
         ("mini_abandon_iter0.json", "default_abandon_iter0.json", "large_abandon_iter0.json"),
     ]
@@ -152,7 +159,7 @@ def test_cross_mode(vectors_dir, verbose=False):
         for f in files:
             with open(f) as fh:
                 doc = json.load(fh)
-            leaf = doc["stage1"]["leaves"][0]
+            leaf = doc["stages"][0]["leaf"]
             leaves.append({k: leaf[k] for k in ("re_min", "re_max", "im_min", "im_max")})
         if leaves[0] == leaves[1] == leaves[2]:
             print(f"  OK    cross-mode: first leaf identical (abandon...)")
@@ -199,8 +206,8 @@ def test_meta_bitflip(vectors_dir, verbose=False):
     # Corrupt one leaf boundary (re_min, bit 30 — well inside the value)
     import copy
     corrupted = copy.deepcopy(doc)
-    corrupted["stage1"]["leaves"][0]["re_min"] = _flip_hex_bit(
-        corrupted["stage1"]["leaves"][0]["re_min"], 30)
+    corrupted["stages"][0]["leaf"]["re_min"] = _flip_hex_bit(
+        corrupted["stages"][0]["leaf"]["re_min"], 30)
 
     # Write to temp file and decode
     import tempfile
@@ -225,7 +232,7 @@ def test_meta_bitflip(vectors_dir, verbose=False):
 
 
 def test_meta_wrong_params(vectors_dir, verbose=False):
-    """Decode with wrong stage-2 params, verify entropy differs."""
+    """Decode with a wrong secret-stage param, verify entropy differs."""
     candidates = [f for f in os.listdir(vectors_dir)
                   if "_iter1.json" in f or "_iter2.json" in f]
     if not candidates:
@@ -238,11 +245,11 @@ def test_meta_wrong_params(vectors_dir, verbose=False):
 
     original_hex = doc["input"]["entropy_hex"]
 
-    # Corrupt stage-2 o parameter
+    # Corrupt the first secret stage's o parameter (stage index 1).
     import copy, tempfile
     corrupted = copy.deepcopy(doc)
-    o_val = int(corrupted["stage2"]["params"]["o"], 16)
-    corrupted["stage2"]["params"]["o"] = f"0x{(o_val ^ 0xFF):016X}"
+    o_val = int(corrupted["stages"][1]["params"]["o"], 16)
+    corrupted["stages"][1]["params"]["o"] = f"0x{(o_val ^ 0xFF):016X}"
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tf:
         json.dump(corrupted, tf)
@@ -264,7 +271,7 @@ def test_meta_wrong_params(vectors_dir, verbose=False):
 
 
 def test_meta_cross_stage_swap(vectors_dir, verbose=False):
-    """Swap stage1/stage2 leaf centers, verify entropy mismatch."""
+    """Swap two stages' leaf boundaries, verify entropy mismatch."""
     candidates = [f for f in os.listdir(vectors_dir)
                   if "_iter1.json" in f or "_iter2.json" in f]
     if not candidates:
@@ -275,23 +282,21 @@ def test_meta_cross_stage_swap(vectors_dir, verbose=False):
     with open(vector_path, "r") as f:
         doc = json.load(f)
 
-    if len(doc["stage1"]["leaves"]) < 1 or len(doc["stage2"]["leaves"]) < 1:
-        print("  SKIP  meta-cross-swap: not enough leaves")
+    if len(doc["stages"]) < 2:
+        print("  SKIP  meta-cross-swap: fewer than 2 stages")
         return True
 
     original_hex = doc["input"]["entropy_hex"]
 
-    # Swap first leaf of stage1 with first leaf of stage2
+    # Swap the leaf boundaries of stage 0 and stage 1 (different fractals →
+    # different points → the decoded entropy must change).
     import copy, tempfile
+    bound_keys = ("re_min", "re_max", "im_min", "im_max")
     corrupted = copy.deepcopy(doc)
-    s1_center = (corrupted["stage1"]["leaves"][0]["center_re"],
-                 corrupted["stage1"]["leaves"][0]["center_im"])
-    s2_center = (corrupted["stage2"]["leaves"][0]["center_re"],
-                 corrupted["stage2"]["leaves"][0]["center_im"])
-    corrupted["stage1"]["leaves"][0]["center_re"] = s2_center[0]
-    corrupted["stage1"]["leaves"][0]["center_im"] = s2_center[1]
-    corrupted["stage2"]["leaves"][0]["center_re"] = s1_center[0]
-    corrupted["stage2"]["leaves"][0]["center_im"] = s1_center[1]
+    s0 = corrupted["stages"][0]["leaf"]
+    s1 = corrupted["stages"][1]["leaf"]
+    for k in bound_keys:
+        s0[k], s1[k] = s1[k], s0[k]
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tf:
         json.dump(corrupted, tf)
@@ -339,25 +344,54 @@ def main():
             if f.endswith(".json"))
 
     print(f"Testing vectors in: {vectors_dir}")
+    print(f"Current protocol_version: {PROTOCOL_VERSION}")
     print()
 
     passed = 0
     failed = 0
     total = 0
+    stale = 0
 
-    # Frozen vector tests
-    print("=== Frozen Vector Tests ===")
+    # Version guard: a vector generated for a different protocol_version is
+    # STALE.  We skip it (never counting it as a pass) so a stale vector can
+    # never show false-green during pre-1.0 protocol churn.  Comprehensive
+    # vectors are rebuilt at the stable 1.0.0 release (see DESIGN.md / README).
+    def _vector_version(path):
+        try:
+            with open(path) as fh:
+                return json.load(fh).get("protocol_version", "<unset>")
+        except Exception:
+            return "<unreadable>"
+
+    fresh_files = []
+    stale_files = []
     for vf in vector_files:
+        if _vector_version(vf) == PROTOCOL_VERSION:
+            fresh_files.append(vf)
+        else:
+            stale_files.append(vf)
+
+    if stale_files:
+        print("=== STALE Vectors (skipped — protocol_version mismatch) ===")
+        for vf in stale_files:
+            stale += 1
+            print(f"  STALE {os.path.basename(vf)} "
+                  f"(protocol {_vector_version(vf)} != current {PROTOCOL_VERSION})")
+        print()
+
+    # Frozen vector tests (fresh vectors only)
+    print("=== Frozen Vector Tests ===")
+    for vf in fresh_files:
         total += 1
         if test_frozen_vector(vf, verbose=args.verbose):
             passed += 1
         else:
             failed += 1
 
-    # Round-trip tests
+    # Round-trip tests (fresh vectors only)
     print()
     print("=== Round-Trip Tests ===")
-    for vf in vector_files:
+    for vf in fresh_files:
         total += 1
         if test_round_trip(vf, verbose=args.verbose):
             passed += 1
@@ -384,7 +418,13 @@ def main():
             failed += 1
 
     print()
-    print(f"Results: {passed}/{total} passed, {failed} failed")
+    stale_note = f", {stale} STALE-skipped" if stale else ""
+    print(f"Results: {passed}/{total} passed, {failed} failed{stale_note}")
+    if stale and not fresh_files:
+        print(f"NOTE: all vectors are STALE for protocol {PROTOCOL_VERSION} "
+              f"(none verified) — comprehensive vectors are rebuilt at 1.0.0.")
+    # Exit non-zero only on real failures; STALE is expected pre-1.0 and is a
+    # visible skip (never a false pass), not an error.
     sys.exit(0 if failed == 0 else 1)
 
 

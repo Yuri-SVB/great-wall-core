@@ -1,21 +1,33 @@
 {
   "version": "0.1.0",
+  "protocol_version": "0.2.0",
   "input": {
     "entropy_hex": "951df7837eb13d5a019d1669a0280dbd",
     "entropy_bits": 128,
     "bip39_mnemonic": "never use this word because public all people have access address key",
     "argon2_profile": "b",
     "argon2_iterations": 0,
-    "gw_mode": "d"
+    "gw_mode": "d",
+    "bip39_words": 12,
+    "n_stages": 4
   },
-  "stage1": {
-    "params": {
-      "o": 0,
-      "p": 0,
-      "q": 0
-    },
-    "leaves": [
-      {
+  "stages": [
+    {
+      "index": 0,
+      "canonical": true,
+      "params": {
+        "o": "0x0000000000000000",
+        "p": "0x0000000000000000",
+        "q": "0x0000000000000000",
+        "o_re": 0.0,
+        "o_im": 0.0,
+        "p_re": 0.0,
+        "p_im": 0.0,
+        "q_re": 0.0,
+        "q_im": 0.0
+      },
+      "argon2": null,
+      "leaf": {
         "re_min": "0x090CEA8BE71B5F40",
         "re_max": "0x090CEA91A6718FB2",
         "im_min": "0xF01A7C46B4794B18",
@@ -24,49 +36,60 @@
         "re_max_f64": 0.5656533898792054,
         "im_min_f64": -0.9935338247382053,
         "im_max_f64": -0.9935338042962596,
-        "point": 1,
         "path": "OrULdLruRulURdrurdrRdurrdrlUUludD"
-      },
-      {
-        "re_min": "0xF7BE85D6B9DD6A31",
-        "re_max": "0xF7BE87699843E175",
-        "im_min": "0xF03056D5E8511C9F",
-        "im_max": "0xF030579F8F2226F1",
-        "re_min_f64": -0.5159856426491038,
-        "re_max_f64": -0.5159841418460541,
-        "im_min_f64": -0.9881984371413005,
-        "im_max_f64": -0.98819768593045,
-        "point": 2,
-        "path": "OLdrDDRDlDurDlUldluRRDRUrUDlDruRu"
       }
-    ]
-  },
-  "argon2": {
-    "input_hex": "951df7837eb13d5a",
-    "profile": "basic",
-    "iterations": 0,
-    "digests": [
-      {
-        "iteration": 0,
-        "hex": "951df7837eb13d5a000000000000000000000000000000000000000000000000"
-      }
-    ],
-    "final_digest": "951df7837eb13d5a000000000000000000000000000000000000000000000000"
-  },
-  "stage2": {
-    "params": {
-      "o": "0x57ABADC120CE1138",
-      "p": "0x4D3FD97A0BC97B27",
-      "q": "0xD180A4F194E24B79",
-      "o_re": 0.027864262694492936,
-      "o_im": 0.12862333527300507,
-      "p_re": 0.23675265768542886,
-      "p_im": 0.17119595926487818,
-      "q_re": -0.03877475543413311,
-      "q_im": -0.03494740105816163
     },
-    "leaves": [
-      {
+    {
+      "index": 1,
+      "canonical": false,
+      "params": {
+        "o": "0x8870023505270EEF",
+        "p": "0xC7CE9BD73827EDE2",
+        "q": "0xCA37A1F843EC0948",
+        "o_re": 0.24164159037172794,
+        "o_im": -0.1682131001725793,
+        "p_re": 0.16001871309708804,
+        "p_im": -0.24016085179755464,
+        "q_re": 0.00453206806560047,
+        "q_im": -0.007696078420849517
+      },
+      "argon2": {
+        "input_hex": "951df783",
+        "iterations": 0,
+        "final_digest": "951df78300000000000000000000000000000000000000000000000000000000"
+      },
+      "leaf": {
+        "re_min": "0xEFCAE1FD0AFB5FCF",
+        "re_max": "0xEFCAE3878E6E19A9",
+        "im_min": "0xF1C0D8145563D3F8",
+        "im_max": "0xF1C0D959FBA774F2",
+        "re_min_f64": -1.012968074370555,
+        "re_max_f64": -1.012966604693355,
+        "im_min_f64": -0.8904189305992629,
+        "im_max_f64": -0.8904177174604537,
+        "path": "OldDrdRdLrUrdluurUlDRdruDlDLdrurU"
+      }
+    },
+    {
+      "index": 2,
+      "canonical": false,
+      "params": {
+        "o": "0x57ABADC120CE1138",
+        "p": "0x4D3FD97A0BC97B27",
+        "q": "0xD180A4F194E24B79",
+        "o_re": 0.027864262694492936,
+        "o_im": 0.12862333527300507,
+        "p_re": 0.23675265768542886,
+        "p_im": 0.17119595926487818,
+        "q_re": -0.03877475543413311,
+        "q_im": -0.03494740105816163
+      },
+      "argon2": {
+        "input_hex": "951df7837eb13d5a",
+        "iterations": 0,
+        "final_digest": "951df7837eb13d5a000000000000000000000000000000000000000000000000"
+      },
+      "leaf": {
         "re_min": "0xF3FF1DD6C7F4CF00",
         "re_max": "0xF3FF1E28A680BC09",
         "im_min": "0xF993D6B38414FF1B",
@@ -75,21 +98,39 @@
         "re_max_f64": -0.7502153789609602,
         "im_min_f64": -0.40140657307227934,
         "im_max_f64": -0.401406316672822,
-        "point": 1,
         "path": "OLULULULdrULDRdlDULurlrRUlDDLdluR"
-      },
-      {
-        "re_min": "0x018E54CBDDFE1187",
-        "re_max": "0x018E556D5948DDEE",
-        "im_min": "0xF34331F8ECF52DF2",
-        "im_max": "0xF34332F6D1B222AF",
-        "re_min_f64": 0.09724883685692409,
-        "re_max_f64": 0.09724943842279953,
-        "im_min_f64": -0.7960949207633132,
-        "im_max_f64": -0.7960939749362902,
-        "point": 2,
-        "path": "OrURUlUlUUURURulLuluLDRURdlDDrdlr"
       }
-    ]
-  }
+    },
+    {
+      "index": 3,
+      "canonical": false,
+      "params": {
+        "o": "0xF798EE5C57493389",
+        "p": "0x8A12E7F77F9267B8",
+        "q": "0xA6A28A756BC6AD82",
+        "o_re": 0.14238194993231446,
+        "o_im": -0.05709496035706252,
+        "p_re": 0.1395993977203034,
+        "p_im": -0.2421403550542891,
+        "q_re": 0.016042127594118938,
+        "q_im": -0.04255797486985102
+      },
+      "argon2": {
+        "input_hex": "951df7837eb13d5a019d1669",
+        "iterations": 0,
+        "final_digest": "951df7837eb13d5a019d16690000000000000000000000000000000000000000"
+      },
+      "leaf": {
+        "re_min": "0xF4D47CC68A9666F9",
+        "re_max": "0xF4D47D78F1B9BD3A",
+        "im_min": "0xF5146142B1ABA741",
+        "im_max": "0xF51461CD46BF902D",
+        "re_min_f64": -0.6981231922605728,
+        "re_max_f64": -0.6981225276580438,
+        "im_min_f64": -0.6825244326367025,
+        "im_max_f64": -0.6825239163772743,
+        "path": "ORURUlUUluUruRulULULURdlrdLdrDrUR"
+      }
+    }
+  ]
 }

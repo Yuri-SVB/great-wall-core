@@ -5,7 +5,6 @@ Text input field keyboard handling for the BIP39 input.
 import pygame
 
 from constants import CLR_SUCCESS, CLR_ERROR
-from encoding import encode_bip39, encode_bip39_stage2
 from session import copy_to_clipboard, paste_from_clipboard
 
 
@@ -82,37 +81,14 @@ def handle_text_input(state, event):
     cur = state.input_cursor
 
     if event.key == pygame.K_RETURN:
+        # Encode the full mnemonic into ALL stages via the memory-hard chain.
+        # Imported lazily to avoid a circular import (viewer imports this module).
+        from viewer import encode_full_mnemonic
         try:
-            if state.stage == 2:
-                pts, chunks, steps, frects = encode_bip39_stage2(
-                    state.input_text, state.stage2_o, state.stage2_p, state.stage2_q,
-                    num_points=state.points_per_stage)
-                state.stage2_encoded_points = pts
-                state.stage2_encoded_bits_chunks = chunks
-                state.stage2_encoded_steps = steps
-                state.stage2_encoded_final_rects = frects
-                state.selected_point_idx = None
-                state.selected_decoded_idx = None
-                state.status_msg = f"Encoded {state.points_per_stage} points ({state.bits_per_stage} bits, stage 2)"
-                state.status_color = CLR_SUCCESS
-                state.needs_redraw = True
-            else:
-                pts, chunks, steps, frects = encode_bip39(state.input_text,
-                    num_points=state.points_per_stage)
-                state.stage1_encoded_points = pts
-                state.stage1_encoded_bits_chunks = chunks
-                state.stage1_encoded_steps = steps
-                state.stage1_encoded_final_rects = frects
-                state.selected_point_idx = None
-                state.selected_decoded_idx = None
-                stage1 = []
-                for c in chunks:
-                    stage1.extend(c)
-                state.argon2_stage1_bits = stage1
-                state.argon2_digest = ""
-                state.status_msg = f"Encoded {state.points_per_stage} points ({state.bits_per_stage} bits, stage 1)"
-                state.status_color = CLR_SUCCESS
-                state.needs_redraw = True
+            encode_full_mnemonic(state)
+            state.status_msg = (f"Encoded {state.n_stages} stages "
+                                f"({state.entropy_bits} bits)")
+            state.status_color = CLR_SUCCESS
         except ValueError as e:
             state.status_msg = f"Error: {e}"
             state.status_color = CLR_ERROR

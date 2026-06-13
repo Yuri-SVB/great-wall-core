@@ -1,10 +1,21 @@
 """
 Minimal BIP39 mnemonic ↔ bit-array conversion.
 
-Supports 6, 12, and 24 word mnemonics:
-  6 words  →  66 bits ( 64 entropy +  2 checksum)
- 12 words  → 132 bits (128 entropy +  4 checksum)
- 24 words  → 264 bits (256 entropy +  8 checksum)
+Supports every word count that is a multiple of 3, from 3 to 24 words — i.e.
+every entropy size that is a multiple of 32 bits, from 32 to 256:
+
+   3 words →  33 bits ( 32 entropy + 1 checksum)   [sub-standard]
+   6 words →  66 bits ( 64 entropy + 2 checksum)   [sub-standard]
+   9 words →  99 bits ( 96 entropy + 3 checksum)   [sub-standard]
+  12 words → 132 bits (128 entropy + 4 checksum)   [standard]
+  15 words → 165 bits (160 entropy + 5 checksum)   [standard]
+  18 words → 198 bits (192 entropy + 6 checksum)   [standard]
+  21 words → 231 bits (224 entropy + 7 checksum)   [standard]
+  24 words → 264 bits (256 entropy + 8 checksum)   [standard]
+
+This mirrors the one-point-per-stage protocol (n_stages = entropy/32 = words/3).
+24 words / 256 bits is a hard cap (see constants.MAX_ENTROPY_BITS): larger
+mnemonics are valid BIP39 in principle but deliberately not offered.
 """
 
 import hashlib
@@ -21,11 +32,15 @@ BIP39_WORDLIST_SIZE = 2048
 BITS_PER_WORD = 11            # log2(2048)
 BITS_PER_BYTE = 8
 
-# Supported configurations: word_count → (entropy_bits, checksum_bits)
+# Hard cap: 24 words / 256 entropy bits (matches constants.MAX_ENTROPY_BITS).
+MAX_WORDS = 24
+
+# Supported configurations: word_count → (entropy_bits, checksum_bits).
+# word_count is any multiple of 3 up to MAX_WORDS; entropy = words/3 * 32,
+# checksum = entropy / 32 = words / 3.
 BIP39_CONFIGS = {
-    6:  (64,  2),
-    12: (128, 4),
-    24: (256, 8),
+    w: ((w // 3) * 32, w // 3)
+    for w in range(3, MAX_WORDS + 1, 3)
 }
 
 # Legacy aliases for 12-word default
@@ -63,7 +78,7 @@ def _checksum_bits(entropy_bits_list):
 
 
 def mnemonic_to_bits(mnemonic: str) -> list:
-    """Convert a BIP39 mnemonic (6, 12, or 24 words) to bits.
+    """Convert a BIP39 mnemonic (any multiple of 3 words, 3..24) to bits.
 
     Returns the full bit list including checksum.
     Validates checksum. Raises ValueError on invalid input.
@@ -71,7 +86,11 @@ def mnemonic_to_bits(mnemonic: str) -> list:
     words = mnemonic.strip().lower().split()
     n = len(words)
     if n not in BIP39_CONFIGS:
-        raise ValueError(f"Expected 6, 12, or 24 words, got {n}")
+        if n > MAX_WORDS:
+            raise ValueError(
+                f"{n} words exceeds the {MAX_WORDS}-word cap (256-bit entropy)")
+        raise ValueError(
+            f"Expected a multiple of 3 words (3..{MAX_WORDS}), got {n}")
 
     entropy_len, cs_len = BIP39_CONFIGS[n]
     total_bits = entropy_len + cs_len

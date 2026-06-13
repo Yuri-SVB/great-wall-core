@@ -1,0 +1,260 @@
+{
+  "version": "0.1.0",
+  "protocol_version": "0.2.0",
+  "input": {
+    "entropy_hex": "951df7837eb13d5a019d1669a0280dbd0951df7837eb13d5a019d1669a0280db",
+    "entropy_bits": 256,
+    "bip39_mnemonic": "never use this word because public all people have access address key never use this word because public all people have access address leaf",
+    "argon2_profile": "b",
+    "argon2_iterations": 0,
+    "gw_mode": "l",
+    "bip39_words": 24,
+    "n_stages": 8
+  },
+  "stages": [
+    {
+      "index": 0,
+      "canonical": true,
+      "params": {
+        "o": "0x0000000000000000",
+        "p": "0x0000000000000000",
+        "q": "0x0000000000000000",
+        "o_re": 0.0,
+        "o_im": 0.0,
+        "p_re": 0.0,
+        "p_im": 0.0,
+        "q_re": 0.0,
+        "q_im": 0.0
+      },
+      "argon2": null,
+      "leaf": {
+        "re_min": "0x090CEA8BE71B5F40",
+        "re_max": "0x090CEA91A6718FB2",
+        "im_min": "0xF01A7C46B4794B18",
+        "im_max": "0xF01A7C4C313BCDDF",
+        "re_min_f64": 0.5656533684684388,
+        "re_max_f64": 0.5656533898792054,
+        "im_min_f64": -0.9935338247382053,
+        "im_max_f64": -0.9935338042962596,
+        "path": "OrULdLruRulURdrurdrRdurrdrlUUludD"
+      }
+    },
+    {
+      "index": 1,
+      "canonical": false,
+      "params": {
+        "o": "0x8870023505270EEF",
+        "p": "0xC7CE9BD73827EDE2",
+        "q": "0xCA37A1F843EC0948",
+        "o_re": 0.24164159037172794,
+        "o_im": -0.1682131001725793,
+        "p_re": 0.16001871309708804,
+        "p_im": -0.24016085179755464,
+        "q_re": 0.00453206806560047,
+        "q_im": -0.007696078420849517
+      },
+      "argon2": {
+        "input_hex": "951df783",
+        "iterations": 0,
+        "final_digest": "951df78300000000000000000000000000000000000000000000000000000000"
+      },
+      "leaf": {
+        "re_min": "0xEFCAE1FD0AFB5FCF",
+        "re_max": "0xEFCAE3878E6E19A9",
+        "im_min": "0xF1C0D8145563D3F8",
+        "im_max": "0xF1C0D959FBA774F2",
+        "re_min_f64": -1.012968074370555,
+        "re_max_f64": -1.012966604693355,
+        "im_min_f64": -0.8904189305992629,
+        "im_max_f64": -0.8904177174604537,
+        "path": "OldDrdRdLrUrdluurUlDRdruDlDLdrurU"
+      }
+    },
+    {
+      "index": 2,
+      "canonical": false,
+      "params": {
+        "o": "0x57ABADC120CE1138",
+        "p": "0x4D3FD97A0BC97B27",
+        "q": "0xD180A4F194E24B79",
+        "o_re": 0.027864262694492936,
+        "o_im": 0.12862333527300507,
+        "p_re": 0.23675265768542886,
+        "p_im": 0.17119595926487818,
+        "q_re": -0.03877475543413311,
+        "q_im": -0.03494740105816163
+      },
+      "argon2": {
+        "input_hex": "951df7837eb13d5a",
+        "iterations": 0,
+        "final_digest": "951df7837eb13d5a000000000000000000000000000000000000000000000000"
+      },
+      "leaf": {
+        "re_min": "0xF3FF1DD6C7F4CF00",
+        "re_max": "0xF3FF1E28A680BC09",
+        "im_min": "0xF993D6B38414FF1B",
+        "im_max": "0xF993D6F857B7F375",
+        "re_min_f64": -0.7502156839479535,
+        "re_max_f64": -0.7502153789609602,
+        "im_min_f64": -0.40140657307227934,
+        "im_max_f64": -0.401406316672822,
+        "path": "OLULULULdrULDRdlDULurlrRUlDDLdluR"
+      }
+    },
+    {
+      "index": 3,
+      "canonical": false,
+      "params": {
+        "o": "0xF798EE5C57493389",
+        "p": "0x8A12E7F77F9267B8",
+        "q": "0xA6A28A756BC6AD82",
+        "o_re": 0.14238194993231446,
+        "o_im": -0.05709496035706252,
+        "p_re": 0.1395993977203034,
+        "p_im": -0.2421403550542891,
+        "q_re": 0.016042127594118938,
+        "q_im": -0.04255797486985102
+      },
+      "argon2": {
+        "input_hex": "951df7837eb13d5a019d1669",
+        "iterations": 0,
+        "final_digest": "951df7837eb13d5a019d16690000000000000000000000000000000000000000"
+      },
+      "leaf": {
+        "re_min": "0xF4D47CC68A9666F9",
+        "re_max": "0xF4D47D78F1B9BD3A",
+        "im_min": "0xF5146142B1ABA741",
+        "im_max": "0xF51461CD46BF902D",
+        "re_min_f64": -0.6981231922605728,
+        "re_max_f64": -0.6981225276580438,
+        "im_min_f64": -0.6825244326367025,
+        "im_max_f64": -0.6825239163772743,
+        "path": "ORURUlUUluUruRulULULURdlrdLdrDrUR"
+      }
+    },
+    {
+      "index": 4,
+      "canonical": false,
+      "params": {
+        "o": "0x3463AA9F4637E7E5",
+        "p": "0x6F319A049F976C78",
+        "q": "0xC5CC05B062E7D756",
+        "o_re": 0.1639706549467519,
+        "o_im": 0.2434912647586316,
+        "p_re": -0.1397531775292009,
+        "p_im": 0.14079580426914617,
+        "q_re": 0.02610388127504848,
+        "q_im": -0.0033266083628404886
+      },
+      "argon2": {
+        "input_hex": "951df7837eb13d5a019d1669a0280dbd",
+        "iterations": 0,
+        "final_digest": "951df7837eb13d5a019d1669a0280dbd00000000000000000000000000000000"
+      },
+      "leaf": {
+        "re_min": "0xF02C81298CCD953F",
+        "re_max": "0xF02C81AB44724133",
+        "im_min": "0xF919BE0DC965BBF9",
+        "im_max": "0xF919BE77515A8226",
+        "re_min_f64": -0.9891346337273272,
+        "re_max_f64": -0.9891341504925177,
+        "im_min_f64": -0.43121523489539104,
+        "im_max_f64": -0.43121484176148733,
+        "path": "OLUlUdLLDUrUDlulrDrUrdDrDlDRDruLL"
+      }
+    },
+    {
+      "index": 5,
+      "canonical": false,
+      "params": {
+        "o": "0x1332E45495CD77E8",
+        "p": "0x9D53130E0FDD7EAA",
+        "q": "0x2B7BFB171982926A",
+        "o_re": -0.023371512535959482,
+        "o_im": 0.04116554232314229,
+        "p_re": 0.1667456324212253,
+        "p_im": -0.18007048009894788,
+        "q_re": 0.02106595633085817,
+        "q_im": 0.05685412447201088
+      },
+      "argon2": {
+        "input_hex": "951df7837eb13d5a019d1669a0280dbd0951df78",
+        "iterations": 0,
+        "final_digest": "951df7837eb13d5a019d1669a0280dbd0951df78000000000000000000000000"
+      },
+      "leaf": {
+        "re_min": "0xEC9E4B8929683193",
+        "re_max": "0xEC9E4C18EC58FF77",
+        "im_min": "0xFB976951F87F1D5F",
+        "im_max": "0xFB976A5D14E7C74A",
+        "re_min_f64": -1.2113537447089473,
+        "re_max_f64": -1.2113532091556751,
+        "im_min_f64": -0.2755343244571626,
+        "im_max_f64": -0.2755333293912498,
+        "path": "OlUrdlDdRdRrURurdLULDlurrdRururur"
+      }
+    },
+    {
+      "index": 6,
+      "canonical": false,
+      "params": {
+        "o": "0x3AD6CBCCB9AE942B",
+        "p": "0x354C4E3127D88753",
+        "q": "0xF7B9C65579B3E25E",
+        "o_re": -0.2071894051041454,
+        "o_im": 0.05061118840239942,
+        "p_re": 0.22406217374373227,
+        "p_im": 0.1935771902790293,
+        "q_re": 0.029853633110178635,
+        "q_im": -0.0415989083412569
+      },
+      "argon2": {
+        "input_hex": "951df7837eb13d5a019d1669a0280dbd0951df7837eb13d5",
+        "iterations": 0,
+        "final_digest": "951df7837eb13d5a019d1669a0280dbd0951df7837eb13d50000000000000000"
+      },
+      "leaf": {
+        "re_min": "0x028F1555C163F953",
+        "re_max": "0x028F172C5F509426",
+        "im_min": "0xF2CD53F8F1498908",
+        "im_max": "0xF2CD54C30192AC31",
+        "re_min_f64": 0.1599324559995224,
+        "re_max_f64": 0.1599342091840628,
+        "im_min_f64": -0.8248710895235527,
+        "im_max_f64": -0.8248703367779244,
+        "path": "OrURUlUulUlUdrluRdRUruLURuDRULDru"
+      }
+    },
+    {
+      "index": 7,
+      "canonical": false,
+      "params": {
+        "o": "0x370A117D6F8ADCF9",
+        "p": "0xEEAC8806DDB7DFB4",
+        "q": "0x94E564D64D3D2E2D",
+        "o_re": 0.15549972595181316,
+        "o_im": 0.18606687965802848,
+        "p_re": -0.14745317195774987,
+        "p_im": -0.17190782324178144,
+        "q_re": 0.044056641665520146,
+        "q_im": -0.02615990920457989
+      },
+      "argon2": {
+        "input_hex": "951df7837eb13d5a019d1669a0280dbd0951df7837eb13d5a019d166",
+        "iterations": 0,
+        "final_digest": "951df7837eb13d5a019d1669a0280dbd0951df7837eb13d5a019d16600000000"
+      },
+      "leaf": {
+        "re_min": "0xFB564331DF6503C8",
+        "re_max": "0xFB5644003C7706BD",
+        "im_min": "0xEDFE462E4FF881BD",
+        "im_max": "0xEDFE473E02E9E810",
+        "re_min_f64": -0.29143982428075704,
+        "re_max_f64": -0.2914390555166036,
+        "im_min_f64": -1.1254213515207705,
+        "im_max_f64": -1.1254203393631368,
+        "path": "ORUldruRULLULUUrUrULULUlUrdlrdlDr"
+      }
+    }
+  ]
+}

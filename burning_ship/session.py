@@ -11,10 +11,10 @@ from burning_ship_engine import cache_clear_stage2
 from bip39 import bits_to_mnemonic
 from constants import (
     SIZE_PRESETS,
-    STAGE1_O, STAGE1_P, STAGE1_Q,
     PROFILE_BASIC,
 )
-from encoding import encode_bits_stage, compute_checksum_bits
+from encoding import compute_checksum_bits
+import protocol
 
 
 # ---------------------------------------------------------------------------
@@ -89,43 +89,38 @@ def paste_from_clipboard():
 # ---------------------------------------------------------------------------
 
 def save_session(state, path):
-    """Save the current encoding session to a JSON file (F6)."""
+    """Save the current encoding session to a JSON file (F6).
+
+    Serialized with the chained, one-point-per-stage layout: per-stage leaf
+    centers, per-stage params (list of dicts; element 0 is null = canonical),
+    the active stage index, and the cumulative path/marker.
+    """
     entropy_bits = []
-    for c in state.stage1_encoded_bits_chunks:
-        entropy_bits.extend(c)
-    for c in state.stage2_encoded_bits_chunks:
-        entropy_bits.extend(c)
+    for chunks in state.stages_encoded_bits_chunks:
+        for c in chunks:
+            entropy_bits.extend(c)
 
     expected_ent = state.entropy_bits
     checksum_bits = compute_checksum_bits(entropy_bits) if len(entropy_bits) == expected_ent else []
     mnemonic = bits_to_mnemonic(entropy_bits) if len(entropy_bits) == expected_ent else ""
 
-    # Leaf-area centers: fixed_to_f64 of each encoded point's raw coords
-    s1_centers = []
-    for (re, im, re_raw, im_raw) in state.stage1_encoded_points:
-        s1_centers.append({"re_raw": re_raw, "im_raw": im_raw,
-                           "re_f64": re, "im_f64": im})
-    s2_centers = []
-    for (re, im, re_raw, im_raw) in state.stage2_encoded_points:
-        s2_centers.append({"re_raw": re_raw, "im_raw": im_raw,
-                           "re_f64": re, "im_f64": im})
+    # Per-stage leaf-area centers (one point per stage).
+    stages_centers = []
+    for pts in state.stages_encoded_points:
+        centers = []
+        for (re, im, re_raw, im_raw) in pts:
+            centers.append({"re_raw": re_raw, "im_raw": im_raw,
+                            "re_f64": re, "im_f64": im})
+        stages_centers.append(centers)
 
     doc = {
-        "stage1_leaf_centers": s1_centers,
-        "stage2_leaf_centers": s2_centers,
+        "stages_leaf_centers": stages_centers,
+        "stages_params": state.stages_params,
+        "stage": state.stage,
         "hashing": {
             "profile": state.argon2_profile,
             "iterations": int(state.argon2_iterations) if state.argon2_iterations else 0,
         },
-        "stage2_o": state.stage2_o,
-        "stage2_o_re": state.stage2_o_re,
-        "stage2_o_im": state.stage2_o_im,
-        "stage2_p": state.stage2_p,
-        "stage2_p_re": state.stage2_p_re,
-        "stage2_p_im": state.stage2_p_im,
-        "stage2_q": state.stage2_q,
-        "stage2_q_re": state.stage2_q_re,
-        "stage2_q_im": state.stage2_q_im,
         "digests": {
             "argon2": state.argon2_digest,
         },
@@ -142,7 +137,12 @@ def save_session(state, path):
 
 
 def load_session(state, path):
-    """Load an encoding session from a JSON file (F5)."""
+    """Load an encoding session from a JSON file (F5).
+
+    Detects the preset from the entropy length, then rebuilds every per-stage
+    list by re-driving ``protocol.encode_entropy`` (the chained pipeline) so the
+    stored points/params are reproduced deterministically.
+    """
     with open(path, "r") as f:
         doc = json.load(f)
 
@@ -157,9 +157,6 @@ def load_session(state, path):
     if matched_preset is None:
         raise ValueError(f"Unsupported entropy length {n_ent} bits (expected 64, 128, or 256)")
     state.size_preset = matched_preset
-    bps = state.bits_per_stage
-    stage1_bits = entropy_bits[:bps]
-    stage2_bits = entropy_bits[bps:]
 
     # Hashing parameters
     hashing = doc.get("hashing", {})
@@ -168,45 +165,26 @@ def load_session(state, path):
     state.argon2_iterations = str(iters)
     state.argon2_iter_cursor = len(state.argon2_iterations)
 
-    # Stage-2 parameters
-    state.stage2_o = doc.get("stage2_o")
-    state.stage2_o_re = doc.get("stage2_o_re")
-    state.stage2_o_im = doc.get("stage2_o_im")
-    state.stage2_p = doc.get("stage2_p")
-    state.stage2_p_re = doc.get("stage2_p_re")
-    state.stage2_p_im = doc.get("stage2_p_im")
-    state.stage2_q = doc.get("stage2_q")
-    state.stage2_q_re = doc.get("stage2_q_re")
-    state.stage2_q_im = doc.get("stage2_q_im")
-
-    # Digests
+    # Digests / path info
     digests = doc.get("digests", {})
     state.argon2_digest = digests.get("argon2", "")
-
-    # Path info
     state.stage1_path = doc.get("stage1_path", "O")
     state.argon2_marker = doc.get("argon2_marker", "")
 
-    # Re-encode stage 1 from bits to get points, steps, rects
-    s1_pts, s1_chunks, s1_steps, s1_rects = \
-        encode_bits_stage(stage1_bits, STAGE1_O, STAGE1_P, STAGE1_Q)
-    state.stage1_encoded_points = s1_pts
-    state.stage1_encoded_bits_chunks = s1_chunks
-    state.stage1_encoded_steps = s1_steps
-    state.stage1_encoded_final_rects = s1_rects
-    state.argon2_stage1_bits = stage1_bits
+    # Rebuild all per-stage lists sized to the detected preset, then re-encode
+    # the full chain (N-1 derivations) from the stored entropy bits.
+    state.reset_stage_data()
+    from viewer import populate_stages_from_results  # GUI helper; avoids cycle
+    stages = protocol.encode_entropy(entropy_bits, state.argon2_profile, iters)
+    populate_stages_from_results(state, stages)
+    state.argon2_stage1_bits = list(entropy_bits)
 
-    # Re-encode stage 2 from bits
-    if state.stage2_p is not None and state.stage2_o is not None:
-        s2_pts, s2_chunks, s2_steps, s2_rects = \
-            encode_bits_stage(stage2_bits, state.stage2_o, state.stage2_p, state.stage2_q)
-        state.stage2_encoded_points = s2_pts
-        state.stage2_encoded_bits_chunks = s2_chunks
-        state.stage2_encoded_steps = s2_steps
-        state.stage2_encoded_final_rects = s2_rects
-        state.stage = 2
+    # Restore the active stage if it is valid, else default to 0.
+    saved_stage = doc.get("stage", 0)
+    if isinstance(saved_stage, int) and 0 <= saved_stage < state.n_stages:
+        state.stage = saved_stage
     else:
-        state.stage = 1
+        state.stage = 0
 
     # BIP39 mnemonic
     mnemonic = doc.get("bip39_mnemonic", "")

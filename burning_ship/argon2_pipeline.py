@@ -16,15 +16,14 @@ from burning_ship_engine import (
 from bip39 import bits_to_mnemonic
 from constants import (
     ARGON2_INPUT_BYTES,
-    STAGE1_O, STAGE1_P, STAGE1_Q,
     P_MAGNITUDE_BITS, P_SIGN_BIT_RE, P_SIGN_BIT_IM,
     P_MAGNITUDE_MIN_EXP, P_BASELINE_EXP,
     Q_MAGNITUDE_BITS, Q_SIGN_BIT_RE, Q_SIGN_BIT_IM, Q_MAGNITUDE_MIN_EXP,
     O_MAGNITUDE_BITS, O_SIGN_BIT_RE, O_SIGN_BIT_IM, O_MAGNITUDE_MIN_EXP,
-    CLR_PENDING, CLR_SUCCESS, CLR_ERROR,
+    CLR_PENDING, CLR_SUCCESS, CLR_ERROR, CLR_WARNING,
 )
 from encoding import (
-    argon2_path_marker, encode_bits_stage, bits_to_bytes,
+    argon2_path_marker, bits_to_bytes,
 )
 
 
@@ -91,12 +90,76 @@ def _check_argon2_stop(state):
         raise _Argon2Stopped()
 
 
-def run_argon2_iterative(state, gui_iterations):
-    """Run iterative Argon2d in a background thread, updating state.argon2_progress.
+def argon2_iterate(data, profile, iterations, progress_cb=None, stop_check=None):
+    """Run ``iterations`` sequential Argon2d passes over ``data``.
 
-    Each iteration calls argon2_single() (one Argon2d pass via Rust) and
-    feeds the 32-byte digest back as input for the next iteration.
-    gui_iterations=0 means identity (no Argon2).
+    Each pass feeds the previous 32-byte digest back as the next input — a
+    single sequential, memory-hard chain (the wall-clock cost the protocol is
+    built on).  ``iterations == 0`` is the identity transform: the input is
+    zero-padded/truncated to the digest width and returned unchanged.
+
+    ``progress_cb(done)`` (optional) is invoked after every completed pass, and
+    ``stop_check()`` (optional) is invoked after every pass and may raise to
+    abort the chain.  Returns the final 32-byte digest.
+
+    This is the one place the Argon2 iteration loop lives; the GUI threads and
+    the deterministic CLI/protocol paths all call through here.
+    """
+    if iterations == 0:
+        return data.ljust(ARGON2_DIGEST_BYTES, b'\x00')[:ARGON2_DIGEST_BYTES]
+    digest = argon2_single(data, profile)
+    if progress_cb is not None:
+        progress_cb(1)
+    if stop_check is not None:
+        stop_check()
+    for i in range(1, iterations):
+        digest = argon2_single(digest, profile)
+        if progress_cb is not None:
+            progress_cb(i + 1)
+        if stop_check is not None:
+            stop_check()
+    return digest
+
+
+def derive_stage_params(prior_bits, profile, iterations,
+                        progress_cb=None, stop_check=None):
+    """Derive the next stage's fractal parameters from *all preceding points*.
+
+    Under the one-point-per-stage protocol, a stage's fractal (o, p, q) is the
+    memory-hard hash of the concatenated bits of every point that precedes it:
+    ``Argon2^iterations(prior_bits) → SHA-256 → (o, p, q)``.  Because the input
+    grows by one point per stage and each link is a full Argon2 chain, the cost
+    of descriptively bypassing the derivation compounds across the chain.
+
+    Returns ``(digest, params)`` where ``digest`` is the 32-byte Argon2 output
+    and ``params`` is the 9-tuple from :func:`derive_stage2_params`.
+    """
+    data = bits_to_bytes(prior_bits)
+    digest = argon2_iterate(data, profile, iterations, progress_cb, stop_check)
+    return digest, derive_stage2_params(digest)
+
+
+def _next_underived_stage(state):
+    """Return the lowest stage index k>0 whose fractal is not yet derived.
+
+    Under the chained protocol, the GUI derives one stage at a time.  Returns
+    ``None`` if every stage already has params (nothing left to derive).
+    """
+    for k in range(1, state.n_stages):
+        if state.stages_params[k] is None:
+            return k
+    return None
+
+
+def run_argon2_iterative(state, gui_iterations):
+    """Derive the NEXT stage's fractal in a background thread.
+
+    Under the one-point-per-stage protocol, this reads the cumulative
+    prior-point bits (``state.argon2_stage1_bits``, set by the GUI after each
+    point is fixed), runs ``gui_iterations`` Argon2d passes over them, derives
+    the next un-derived stage's (o, p, q), stores them into
+    ``state.stages_params[next_stage]``, and advances ``state.stage``.
+    ``gui_iterations=0`` means identity (no Argon2).
 
     When state.argon2_save_intermediate is True, intermediate digests are
     checkpointed to disk so the computation can be resumed after interruption
@@ -108,14 +171,20 @@ def run_argon2_iterative(state, gui_iterations):
     attacker skip the wall-clock cost.  It is the user's responsibility to
     delete it (securely) once it has served its purpose.
     """
-    stage1_bits = state.argon2_stage1_bits
+    prior_bits = state.argon2_stage1_bits
     profile = state.argon2_profile
     save_intermediate = getattr(state, "argon2_save_intermediate", False)
+    next_stage = _next_underived_stage(state)
     state.argon2_stop_requested = False
 
     def _worker():
         try:
-            data = bits_to_bytes(stage1_bits)
+            if next_stage is None:
+                state.status_msg = "All stages already derived"
+                state.status_color = CLR_WARNING
+                state.argon2_running = False
+                return
+            data = bits_to_bytes(prior_bits or [])
             if gui_iterations == 0:
                 digest = data.ljust(ARGON2_DIGEST_BYTES, b'\x00')[:ARGON2_DIGEST_BYTES]
                 state.argon2_progress = 1
@@ -156,24 +225,29 @@ def run_argon2_iterative(state, gui_iterations):
                     _check_argon2_stop(state)
 
             state.argon2_digest = digest.hex()
-            state.stage2_o, state.stage2_o_re, state.stage2_o_im, \
-                state.stage2_p, state.stage2_p_re, state.stage2_p_im, \
-                state.stage2_q, state.stage2_q_re, state.stage2_q_im = derive_stage2_params(digest)
+            params = derive_stage2_params(digest)
+            o, o_re, o_im, p, p_re, p_im, q, q_re, q_im = params
+            state.stages_params[next_stage] = {
+                "o": o, "o_re": o_re, "o_im": o_im,
+                "p": p, "p_re": p_re, "p_im": p_im,
+                "q": q, "q_re": q_re, "q_im": q_im,
+            }
             state.argon2_marker = argon2_path_marker(profile, gui_iterations)
             cache_clear_stage2()
-            state.stage = 2
+            state.stage = next_stage
             state.needs_redraw = True
             _PROFILE_LABELS = {PROFILE_BASIC: "Basic", PROFILE_ADVANCED: "Advanced",
                                PROFILE_GREAT_WALL: "Great Wall"}
             profile_label = _PROFILE_LABELS.get(profile, "Basic")
             label = "identity" if gui_iterations == 0 else f"x{gui_iterations}"
+            stage_lbl = f"Stage {next_stage + 1}/{state.n_stages}"
             if state.debug_mode:
-                state.status_msg = (f"Argon2d {profile_label} ({label}) → Stage 2  "
-                                    f"Re(o)={state.stage2_o_re:.6f} Im(o)={state.stage2_o_im:.6f}  "
-                                    f"Re(p)={state.stage2_p_re:.6f} Im(p)={state.stage2_p_im:.6f}  "
-                                    f"Re(q)={state.stage2_q_re:.6f} Im(q)={state.stage2_q_im:.6f}")
+                state.status_msg = (f"Argon2d {profile_label} ({label}) → {stage_lbl}  "
+                                    f"Re(o)={o_re:.6f} Im(o)={o_im:.6f}  "
+                                    f"Re(p)={p_re:.6f} Im(p)={p_im:.6f}  "
+                                    f"Re(q)={q_re:.6f} Im(q)={q_im:.6f}")
             else:
-                state.status_msg = f"Argon2d {profile_label} ({label}) → Stage 2"
+                state.status_msg = f"Argon2d {profile_label} ({label}) → {stage_lbl}"
             state.status_color = CLR_SUCCESS
         except _Argon2Stopped:
             state.argon2_digest = ""
@@ -274,87 +348,56 @@ def run_random_encode(state):
     state.status_color = CLR_PENDING
 
     total_entropy = state.entropy_bits
-    bps = state.bits_per_stage
+    # Progress spans every derived stage (n_stages - 1 derivations), each of
+    # `iters` Argon2 passes; map per-stage per-iteration progress onto the bar.
+    n_derivations = max(1, state.n_stages - 1)
+    state.argon2_progress_total = max(iters, 1) * n_derivations
 
     def _worker():
         try:
+            import protocol  # GUI orchestration import; deferred to avoid cycles.
             rand_bytes = os.urandom(total_entropy // 8)
             entropy_bits = []
             for b in rand_bytes:
                 for j in range(7, -1, -1):
                     entropy_bits.append((b >> j) & 1)
-            stage1_bits = entropy_bits[:bps]
-            stage2_bits = entropy_bits[bps:]
 
-            # Encode stage 1
-            s1_pts, s1_chunks, s1_steps, s1_rects = \
-                encode_bits_stage(stage1_bits, STAGE1_O, STAGE1_P, STAGE1_Q)
-            state.stage1_encoded_points = s1_pts
-            state.stage1_encoded_bits_chunks = s1_chunks
-            state.stage1_encoded_steps = s1_steps
-            state.stage1_encoded_final_rects = s1_rects
-            state.argon2_stage1_bits = stage1_bits
-            state.needs_redraw = True
+            per_stage = max(iters, 1)
 
-            # Argon2 hash
-            data = bits_to_bytes(stage1_bits)
-            save_intermediate = getattr(state, "argon2_save_intermediate", False)
-            if iters == 0:
-                digest = data.ljust(ARGON2_DIGEST_BYTES, b'\x00')[:ARGON2_DIGEST_BYTES]
-                state.argon2_progress = 1
-            elif save_intermediate:
-                input_hex = data.hex()
-                ckpt_path = _checkpoint_path(input_hex, profile)
-                saved = _load_checkpoint(ckpt_path)
-                resume_it = 0
-                digest = None
-                for it in sorted(saved.keys()):
-                    if it <= iters:
-                        resume_it = it
-                        digest = saved[it]
-                if resume_it == 0:
-                    digest = argon2_single(data, profile)
-                    _save_checkpoint(ckpt_path, 1, digest)
-                    state.argon2_progress = 1
-                    resume_it = 1
-                    _check_argon2_stop(state)
-                else:
-                    state.argon2_progress = resume_it
-                for i in range(resume_it, iters):
-                    digest = argon2_single(digest, profile)
-                    _save_checkpoint(ckpt_path, i + 1, digest)
-                    state.argon2_progress = i + 1
-                    _check_argon2_stop(state)
-            else:
-                digest = argon2_single(data, profile)
-                state.argon2_progress = 1
+            def _progress(stage_index, done):
+                # stage_index is the 0-based derived stage (1..n-1).
+                base = (stage_index - 1) * per_stage
+                state.argon2_progress = base + done
+
+            def _stop():
                 _check_argon2_stop(state)
-                for i in range(1, iters):
-                    digest = argon2_single(digest, profile)
-                    state.argon2_progress = i + 1
-                    _check_argon2_stop(state)
 
-            state.argon2_digest = digest.hex()
-            o, o_re, o_im, p, p_re, p_im, q, q_re, q_im = derive_stage2_params(digest)
-            state.stage2_o = o
-            state.stage2_o_re = o_re
-            state.stage2_o_im = o_im
-            state.stage2_p = p
-            state.stage2_p_re = p_re
-            state.stage2_p_im = p_im
-            state.stage2_q = q
-            state.stage2_q_re = q_re
-            state.stage2_q_im = q_im
+            # Drive the full chained encode (N-1 memory-hard derivations).
+            stages = protocol.encode_entropy(
+                entropy_bits, profile, iters,
+                progress_cb=_progress, stop_check=_stop)
+
+            for sr in stages:
+                i = sr.index
+                state.stages_encoded_points[i] = [sr.point]
+                state.stages_encoded_bits_chunks[i] = [sr.chunk]
+                state.stages_encoded_steps[i] = [sr.result.get_all_steps()]
+                state.stages_encoded_final_rects[i] = [sr.result.final_rect]
+                if sr.params is None:
+                    state.stages_params[i] = None
+                else:
+                    o, o_re, o_im, p, p_re, p_im, q, q_re, q_im = sr.params
+                    state.stages_params[i] = {
+                        "o": o, "o_re": o_re, "o_im": o_im,
+                        "p": p, "p_re": p_re, "p_im": p_im,
+                        "q": q, "q_re": q_re, "q_im": q_im,
+                    }
+                if sr.digest is not None:
+                    state.argon2_digest = sr.digest.hex()
+
+            state.argon2_stage1_bits = list(entropy_bits)
             state.argon2_marker = argon2_path_marker(profile, iters)
             cache_clear_stage2()
-
-            # Encode stage 2
-            s2_pts, s2_chunks, s2_steps, s2_rects = \
-                encode_bits_stage(stage2_bits, o, p, q)
-            state.stage2_encoded_points = s2_pts
-            state.stage2_encoded_bits_chunks = s2_chunks
-            state.stage2_encoded_steps = s2_steps
-            state.stage2_encoded_final_rects = s2_rects
 
             # BIP39 mnemonic
             mnemonic = bits_to_mnemonic(entropy_bits)
@@ -363,7 +406,7 @@ def run_random_encode(state):
             state.input_sel = len(mnemonic)
             state.decoded_mnemonic = mnemonic
 
-            state.stage = 2
+            state.stage = 0
             state.needs_redraw = True
             state.selected_point_idx = None
             state.selected_decoded_idx = None
