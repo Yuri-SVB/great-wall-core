@@ -189,10 +189,13 @@ def test_cross_mode(vectors_dir, verbose=False):
 # FALSE-NEGATIVE CLASS TO AVOID: decode reconstructs a point as the midpoint of
 # its leaf and re-derives bits from *which leaf the point lands in* — so the
 # encoding deliberately tolerates any perturbation smaller than a leaf cell
-# (~2^-14..2^-16 wide for a 32-bit point).  A corruption that moves the decoded
-# point by LESS than the leaf width is therefore (correctly) NOT detected.  Any
-# negative test that perturbs a coordinate must move it by MORE than the leaf
-# width (or change the fractal params) to be a genuine corruption.
+# (roughly 2^-15 for a 32-bit point, and much smaller where contraction has
+# shrunk the leaf, e.g. ~2^-22 on the all-zeros path).  A corruption that moves
+# the decoded point by LESS than the leaf width is (correctly) NOT detected.
+# Worse, an EXTREME point (all-zeros / all-ones) sits on the same side of every
+# split, so moving it further in that direction stays on that side and decodes
+# to the SAME bits even once it has left the leaf (valid just goes False).
+# Hence: test leaf MEMBERSHIP from the boundaries, don't perturb-and-decode.
 # ---------------------------------------------------------------------------
 
 def _parse_hex_i64(hex_str):
@@ -230,8 +233,11 @@ def test_meta_leaf_membership(vectors_dir, verbose=False):
     the engine returns the recorded leaf, so the boundaries we test against are
     genuinely the engine's own.
     """
-    # Prefer a non-degenerate leaf: vanity vectors carry mixed bits, so their
-    # leaf is a proper rectangle (all-zeros / all-ones collapse it to a corner).
+    # Prefer a roomier leaf: vanity vectors carry mixed bits, so their leaf is a
+    # well-sized rectangle.  All-zeros / all-ones drive the point to an extreme
+    # corner and repeated contraction shrinks the leaf very small (~2^-22, but
+    # still strictly positive on both axes — NOT zero-width), which is awkward
+    # for building boundary points; vanity avoids that.
     cands = sorted(f for f in os.listdir(vectors_dir)
                    if "vanity" in f and f.endswith("_iter0.json"))
     cands = cands or sorted(f for f in os.listdir(vectors_dir)
@@ -244,7 +250,9 @@ def test_meta_leaf_membership(vectors_dir, verbose=False):
     rmn, rmx = _parse_hex_i64(leaf["re_min"]), _parse_hex_i64(leaf["re_max"])
     imn, imx = _parse_hex_i64(leaf["im_min"]), _parse_hex_i64(leaf["im_max"])
     if rmx <= rmn or imx <= imn:
-        print("  SKIP  meta-leaf-membership: degenerate leaf")
+        # Defensive only: leaf widths stay positive (interior splits + positive
+        # contraction), so a zero-width leaf should never actually occur here.
+        print("  SKIP  meta-leaf-membership: zero-width leaf")
         return True
     wr, wi = rmx - rmn, imx - imn
     cre, cim = _midpoint_i64(rmn, rmx), _midpoint_i64(imn, imx)
