@@ -2510,6 +2510,16 @@ def main():
 
                     if state.select_mode:
                         # --- Chained per-stage select-points flow (1 slot/stage) ---
+                        if state.argon2_running:
+                            # The inter-stage derivation is in progress (its
+                            # progress bar is shown in the Argon2 panel row);
+                            # ignore clicks until the next stage's fractal is
+                            # ready, so we don't decode against a stale stage.
+                            state.status_msg = (
+                                f"Deriving stage {state.stage + 2}/{state.n_stages}… "
+                                f"please wait.")
+                            state.status_color = CLR_PENDING
+                            continue
                         # Defensive resync: if anything (a stale code path, a
                         # session load, an unusual key sequence) left the slot
                         # list out of sync with points_per_stage, snap back to
@@ -2600,7 +2610,15 @@ def main():
                                     state.select_mode = False
                                 else:
                                     # Derive the NEXT stage's fractal from the
-                                    # cumulative decoded bits, then advance to it.
+                                    # cumulative decoded bits — on a background
+                                    # thread so the panel's Argon2 progress bar is
+                                    # shown while the memory-hard derivation runs
+                                    # (it can be slow).  run_argon2_iterative()
+                                    # advances state.stage to the next stage and
+                                    # clears the perturbed cache on completion; we
+                                    # pre-pad that stage's selection slot here so
+                                    # the user can click its point straight away,
+                                    # and guard clicks while argon2_running (above).
                                     prior_bits = state.cumulative_decoded_bits_before(cur + 1)
                                     state.argon2_stage1_bits = prior_bits
                                     try:
@@ -2609,19 +2627,20 @@ def main():
                                             raise ValueError
                                     except ValueError:
                                         iters = 0
-                                    o2, p2, q2, _dg, params = protocol.stage_params(
-                                        cur + 1, prior_bits, state.argon2_profile, iters)
-                                    state.stages_params[cur + 1] = params_dict_from_tuple(params)
-                                    state.stage = cur + 1
-                                    cache_clear_stage2()
+                                    state.stages_selected_points[cur + 1] = (
+                                        [None] * state.points_per_stage)
+                                    state.stages_selected_steps[cur + 1] = []
+                                    state.stages_selected_final_rects[cur + 1] = []
                                     state.select_active_idx = 0
-                                    state.selected_points = [None] * state.points_per_stage
+                                    state.argon2_running = True
+                                    state.argon2_progress = 0
+                                    state.argon2_progress_total = max(iters, 1)
                                     state.status_msg = (
                                         f"Stage {cur + 1}/{state.n_stages} decoded → "
-                                        f"derived stage {cur + 2}/{state.n_stages}. "
-                                        f"Click its point.")
-                                    state.status_color = CLR_ADVANCE
+                                        f"deriving stage {cur + 2}/{state.n_stages}…")
+                                    state.status_color = CLR_PENDING
                                     state.needs_redraw = True
+                                    run_argon2_iterative(state, iters)
                             except Exception as e:
                                 state.status_msg = f"Decode error: {e}"
                                 state.status_color = CLR_ERROR
