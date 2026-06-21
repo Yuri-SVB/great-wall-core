@@ -21,6 +21,7 @@ import subprocess
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 from protocol import PROTOCOL_VERSION  # noqa: E402  (current chained-protocol version)
+from burning_ship_engine import get_engine_version  # noqa: E402  (single-fractal algo version)
 CLI_PATH = os.path.join(SCRIPT_DIR, "cli.py")
 VECTORS_DIR = os.path.join(SCRIPT_DIR, "test_vectors")
 
@@ -432,8 +433,9 @@ def main():
             os.path.join(vectors_dir, f) for f in os.listdir(vectors_dir)
             if f.endswith(".json"))
 
+    current_engine = get_engine_version()
     print(f"Testing vectors in: {vectors_dir}")
-    print(f"Current protocol_version: {PROTOCOL_VERSION}")
+    print(f"Current engine version: {current_engine}   protocol_version: {PROTOCOL_VERSION}")
     print()
 
     passed = 0
@@ -441,31 +443,36 @@ def main():
     total = 0
     stale = 0
 
-    # Version guard: a vector generated for a different protocol_version is
-    # STALE.  We skip it (never counting it as a pass) so a stale vector can
-    # never show false-green during pre-1.0 protocol churn.  Comprehensive
-    # vectors are rebuilt at the stable 1.0.0 release (see DESIGN.md / README).
-    def _vector_version(path):
+    # Version guard: a vector is STALE unless BOTH its engine `version` (the
+    # single-fractal encode/decode algorithm) and its `protocol_version` (the
+    # chained orchestration) match the current code.  Either differing means the
+    # frozen output can no longer reproduce, so we skip it (never counting it as
+    # a pass) — a stale vector can never show false-green during pre-1.0 churn.
+    # Comprehensive vectors are rebuilt at the stable 1.0.0 release (see README).
+    def _vector_versions(path):
         try:
             with open(path) as fh:
-                return json.load(fh).get("protocol_version", "<unset>")
+                d = json.load(fh)
+            return d.get("protocol_version", "<unset>"), d.get("version", "<unset>")
         except Exception:
-            return "<unreadable>"
+            return "<unreadable>", "<unreadable>"
 
     fresh_files = []
     stale_files = []
     for vf in vector_files:
-        if _vector_version(vf) == PROTOCOL_VERSION:
+        pv, ev = _vector_versions(vf)
+        if pv == PROTOCOL_VERSION and ev == current_engine:
             fresh_files.append(vf)
         else:
-            stale_files.append(vf)
+            stale_files.append((vf, pv, ev))
 
     if stale_files:
-        print("=== STALE Vectors (skipped — protocol_version mismatch) ===")
-        for vf in stale_files:
+        print("=== STALE Vectors (skipped — version mismatch) ===")
+        for vf, pv, ev in stale_files:
             stale += 1
             print(f"  STALE {os.path.basename(vf)} "
-                  f"(protocol {_vector_version(vf)} != current {PROTOCOL_VERSION})")
+                  f"(engine {ev}/protocol {pv} != current engine {current_engine}/"
+                  f"protocol {PROTOCOL_VERSION})")
         print()
 
     # Frozen vector tests (fresh vectors only)

@@ -45,8 +45,10 @@ from encoding import stage_text_bytes
 
 
 # Version of the *chained protocol* (this orchestration layer), independent of
-# the Rust ENGINE_VERSION (the single-fractal encode/decode algorithm, which is
-# unchanged at 0.1.0).  This is the token that locks great-wall-core to its
+# the Rust ENGINE_VERSION (the single-fractal encode/decode algorithm, now at
+# 0.2.0 — bumped from 0.1.0 when the island-discovery escape cap was raised to
+# keep deep bisection levels navigable).  This is the token that locks
+# great-wall-core to its
 # authoritative design doc: the design lives only in `great-wall-docs/
 # great-wall-core/DESIGN.md` (the single source of truth) and declares this same
 # version, so the code and the doc are verifiably in sync — bump both together

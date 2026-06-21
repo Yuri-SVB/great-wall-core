@@ -15,7 +15,11 @@ its own fractal derived by hashing stage-0 text plus all preceding points.
 > verifiably in sync: bump the protocol version in both — and re-stamp the
 > encode/decode JSON `protocol_version` field — whenever the protocol's
 > behaviour changes. (This is independent of the Rust `ENGINE_VERSION`, the
-> single-fractal encode/decode algorithm, which is unchanged at `0.1.0`.)
+> single-fractal encode/decode algorithm, now at `0.2.0` — it was bumped from
+> `0.1.0` when the encode/decode island-discovery escape cap was raised
+> (`64 → 1024`) so deep bisection levels near the set boundary stay navigable
+> instead of stalling. That is an output-changing change, so `0.1.0` frozen
+> vectors are flagged **STALE** and rebuilt at the stable release.)
 >
 > **What's new in `0.3.0`** (hard, backward-incompatible — `0.2.0` encodings do
 > not round-trip across it):

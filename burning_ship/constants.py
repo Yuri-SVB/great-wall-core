@@ -17,9 +17,20 @@ from burning_ship_engine import (
 # ---------------------------------------------------------------------------
 
 PALETTE_SIZE = 256                # number of colors per palette (u8 range)
-DEFAULT_MAX_ITER = 64             # default max iterations for rendering
+DEFAULT_MAX_ITER = 64             # default max iterations for *rendering* (visual)
 MAX_ITER_MIN = 1                  # lower bound for user-adjustable max_iter
 MAX_ITER_MAX = 100000             # upper bound for user-adjustable max_iter
+
+# Escape-iteration cap used for ENCODE/DECODE island discovery (GUI_PARAMS).
+# This is intentionally decoupled from (and much larger than) the render cap:
+# as the bisection tree zooms toward the Burning Ship set boundary, escape
+# counts climb toward the cap, and a low cap (e.g. 64) makes almost every sample
+# read as "non-escaping", starving island discovery — deep levels then burn
+# 100k+ samples and the encode effectively stalls.  1024 (the engine's own
+# DiscoveryParams default) keeps boundary-adjacent points escaping so discovery
+# stays fast at every level.  escape_count short-circuits on escape, so the
+# higher cap costs extra work only for the rare genuinely-non-escaping samples.
+ENCODE_MAX_ITER = 1024
 
 # ---------------------------------------------------------------------------
 # Default fractal viewport
@@ -231,7 +242,7 @@ ENCODE_AREA = Rect.from_f64(-2.5, 1.5, -2.0, 1.5)
 # ---------------------------------------------------------------------------
 
 GUI_PARAMS = DiscoveryParams(
-    max_iter=DEFAULT_MAX_ITER,
+    max_iter=ENCODE_MAX_ITER,
     target_good=32,
     max_flood_points=256,
     min_grid_cells=1024*1024,

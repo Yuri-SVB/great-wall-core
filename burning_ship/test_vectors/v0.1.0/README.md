@@ -2,6 +2,14 @@
 
 Engine version: `0.1.0`
 
+> **⚠️ These vectors are now STALE.** The engine algorithm was bumped to
+> `0.2.0` (encode/decode island-discovery escape cap raised `64 → 1024` so deep
+> bisection levels near the set boundary stay navigable instead of stalling).
+> That changes encode output, so every vector here is flagged **STALE** by
+> `test_vectors.py` (engine-version mismatch) and skipped — never a false pass.
+> They are intentionally **not regenerated** yet; comprehensive vectors are
+> rebuilt at the stable `1.0.0` release.
+
 > **⚠️ PROVISIONAL — pre-1.0 protocol.** The chained protocol is still
 > evolving (`protocol_version` `0.3.0`; more breaking changes are planned —
 > new parameter families, etc.), so **comprehensive frozen vectors are

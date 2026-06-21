@@ -3,7 +3,14 @@
 /// Bump MAJOR when the encode/decode output changes for the same input.
 /// Bump MINOR for new features that don't change existing outputs.
 /// Pre-1.0.0: algorithm is unstable and may change freely.
-pub const ENGINE_VERSION: &str = "0.1.0";
+///
+/// 0.2.0: raised the encode/decode island-discovery escape cap (GUI_PARAMS
+///        max_iter 64 -> 1024) so deep bisection levels near the set boundary
+///        stay navigable instead of starving discovery and stalling.  This is
+///        an output-changing (backward-incompatible) algorithm change: 0.1.0
+///        encodings do not reproduce across it, so frozen vectors built under
+///        0.1.0 are STALE and are rebuilt at the stable release.
+pub const ENGINE_VERSION: &str = "0.2.0";
 
 /// Log macro that compiles to nothing unless the `verbose` feature is enabled.
 /// Build with `cargo build --release --features verbose` to activate.
