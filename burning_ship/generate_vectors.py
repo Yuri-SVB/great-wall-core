@@ -42,13 +42,17 @@ BIP39 = {
     ("l", "abandon"): "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art",
 }
 
-# One 32-bit point per stage means each Argon2 iteration is now run once per
-# *secret* stage (n_stages-1 chained derivations), so iters>0 vectors are
-# expensive — especially default (3 links) and large (7 links).  We therefore
-# freeze the full breadth at iter0 (instant identity derivation, which still
-# exercises the chain: each secret stage gets distinct params from the growing
-# prior-point prefix) and add only a few cheap real-Argon2 vectors so the meta
-# tests have iter1/iter2 inputs.  iter0 is generated for every (mode, seed);
+# Protocol 0.3.0: one 32-bit point per (later) stage, and EVERY point stage is
+# chain-derived (Argon2 over stage-0 text + preceding points) — there is no
+# canonical stage, so each Argon2 iteration runs once per point stage (N
+# derivations).  iters>0 vectors are therefore expensive — especially default
+# (4 stages) and large (8 stages).  These vectors use an empty stage-0 text (the
+# CLI default), which still produces a deterministic, chain-derived base fractal
+# for stage 1.  We freeze the full breadth at iter0 (instant identity
+# derivation, which still exercises the chain: each stage gets distinct params
+# from the growing stage-0-text+prior-point prefix) and add only a few cheap
+# real-Argon2 vectors so the meta tests have iter1/iter2 inputs.  iter0 is
+# generated for every (mode, seed);
 # EXTRA_ITER lists the additional (mode, seed, iters) real-Argon2 vectors.
 # Kept deliberately small — the committed set ships one cheap mini iter1 vector
 # so the meta tests have an iter1 input.  Add more here (e.g. ("d","zeros",1),

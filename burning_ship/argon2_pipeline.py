@@ -23,7 +23,7 @@ from constants import (
     CLR_PENDING, CLR_SUCCESS, CLR_ERROR, CLR_WARNING,
 )
 from encoding import (
-    argon2_path_marker, bits_to_bytes,
+    argon2_path_marker, bits_to_bytes, stage_text_bytes,
 )
 
 
@@ -121,31 +121,38 @@ def argon2_iterate(data, profile, iterations, progress_cb=None, stop_check=None)
     return digest
 
 
-def derive_stage_params(prior_bits, profile, iterations,
+def derive_stage_params(stage0_text, prior_bits, profile, iterations,
                         progress_cb=None, stop_check=None):
-    """Derive the next stage's fractal parameters from *all preceding points*.
+    """Derive a point stage's fractal parameters from stage-0 text + prior points.
 
-    Under the one-point-per-stage protocol, a stage's fractal (o, p, q) is the
-    memory-hard hash of the concatenated bits of every point that precedes it:
-    ``Argon2^iterations(prior_bits) → SHA-256 → (o, p, q)``.  Because the input
-    grows by one point per stage and each link is a full Argon2 chain, the cost
-    of descriptively bypassing the derivation compounds across the chain.
+    Under the protocol 0.3.0 chain (DESIGN.md "Chained Protocol"), every point
+    stage's fractal (o, p, q) is the memory-hard hash of **stage-0 text followed
+    by the concatenated bits of every point that precedes it**::
+
+        θ = SHA-256( Argon2^iterations( stage-0 text ‖ prior point bits ) ) → (o, p, q)
+
+    The first point stage (no prior points) therefore derives from stage-0 text
+    alone — so no fractal in the chain is the old public "canonical" surface.
+    Because the input grows by one point per stage and each link is a full Argon2
+    chain, the cost of descriptively bypassing the derivation compounds.
 
     Returns ``(digest, params)`` where ``digest`` is the 32-byte Argon2 output
     and ``params`` is the 9-tuple from :func:`derive_stage2_params`.
     """
-    data = bits_to_bytes(prior_bits)
+    data = stage_text_bytes(stage0_text) + bits_to_bytes(prior_bits)
     digest = argon2_iterate(data, profile, iterations, progress_cb, stop_check)
     return digest, derive_stage2_params(digest)
 
 
 def _next_underived_stage(state):
-    """Return the lowest stage index k>0 whose fractal is not yet derived.
+    """Return the lowest point-stage index whose fractal is not yet derived.
 
-    Under the chained protocol, the GUI derives one stage at a time.  Returns
-    ``None`` if every stage already has params (nothing left to derive).
+    Under protocol 0.3.0 every point stage (including the first, index 0) is
+    chain-derived from stage-0 text + preceding points, so the GUI derives one
+    stage at a time starting at index 0.  Returns ``None`` if every stage
+    already has params (nothing left to derive).
     """
-    for k in range(1, state.n_stages):
+    for k in range(0, state.n_stages):
         if state.stages_params[k] is None:
             return k
     return None
@@ -173,6 +180,8 @@ def run_argon2_iterative(state, gui_iterations):
     """
     prior_bits = state.argon2_stage1_bits
     profile = state.argon2_profile
+    # Stage-0 text seeds every derivation (protocol 0.3.0).
+    stage0_prefix = stage_text_bytes(getattr(state, "stage0_text", ""))
     save_intermediate = getattr(state, "argon2_save_intermediate", False)
     next_stage = _next_underived_stage(state)
     state.argon2_stop_requested = False
@@ -184,7 +193,7 @@ def run_argon2_iterative(state, gui_iterations):
                 state.status_color = CLR_WARNING
                 state.argon2_running = False
                 return
-            data = bits_to_bytes(prior_bits or [])
+            data = stage0_prefix + bits_to_bytes(prior_bits or [])
             if gui_iterations == 0:
                 digest = data.ljust(ARGON2_DIGEST_BYTES, b'\x00')[:ARGON2_DIGEST_BYTES]
                 state.argon2_progress = 1
@@ -348,9 +357,10 @@ def run_random_encode(state):
     state.status_color = CLR_PENDING
 
     total_entropy = state.entropy_bits
-    # Progress spans every derived stage (n_stages - 1 derivations), each of
-    # `iters` Argon2 passes; map per-stage per-iteration progress onto the bar.
-    n_derivations = max(1, state.n_stages - 1)
+    # Progress spans every point stage (N derivations — every stage is derived
+    # in 0.3.0), each of `iters` Argon2 passes; map per-stage per-iteration
+    # progress onto the bar.
+    n_derivations = max(1, state.n_stages)
     state.argon2_progress_total = max(iters, 1) * n_derivations
 
     def _worker():
@@ -365,16 +375,17 @@ def run_random_encode(state):
             per_stage = max(iters, 1)
 
             def _progress(stage_index, done):
-                # stage_index is the 0-based derived stage (1..n-1).
-                base = (stage_index - 1) * per_stage
+                # stage_index is the 0-based point stage (0..N-1).
+                base = stage_index * per_stage
                 state.argon2_progress = base + done
 
             def _stop():
                 _check_argon2_stop(state)
 
-            # Drive the full chained encode (N-1 memory-hard derivations).
+            # Drive the full chained encode (N memory-hard derivations, one per
+            # point stage); stage-0 text seeds the chain.
             stages = protocol.encode_entropy(
-                entropy_bits, profile, iters,
+                entropy_bits, getattr(state, "stage0_text", ""), profile, iters,
                 progress_cb=_progress, stop_check=_stop)
 
             for sr in stages:

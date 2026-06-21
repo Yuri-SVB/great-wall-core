@@ -743,7 +743,28 @@ pub extern "C" fn bs_cache_destroy_stage2() {
 // Argon2 iterative hashing
 // -----------------------------------------------------------------------
 
-use crate::argon2_hash::{iterative_argon2, argon2_single};
+use crate::argon2_hash::{iterative_argon2, argon2_single, argon2id_master};
+
+/// Master-secret export (protocol 0.3.0): one Argon2id pass over the
+/// reproducible setup transcript.
+///
+/// - `msg_ptr` / `msg_len`: the transcript message bytes.
+/// - `out_ptr` / `out_len`: caller-provided output buffer (the Argon2 output
+///   length `l`; the protocol uses 1024 bytes).
+///
+/// Uses Argon2id with the fixed master profile (m = 64 MiB, t = 8, p = 2) and
+/// the fixed salt `b"greatwall"`.
+#[no_mangle]
+pub extern "C" fn bs_argon2id_master(
+    msg_ptr: *const u8,
+    msg_len: u32,
+    out_ptr: *mut u8,
+    out_len: u32,
+) {
+    let message = unsafe { slice::from_raw_parts(msg_ptr, msg_len as usize) };
+    let out = unsafe { slice::from_raw_parts_mut(out_ptr, out_len as usize) };
+    argon2id_master(message, out);
+}
 
 /// Run iterative Argon2d hashing on 8 bytes of stage-1 entropy.
 ///

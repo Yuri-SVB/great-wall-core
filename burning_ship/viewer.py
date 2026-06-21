@@ -8,6 +8,8 @@ Controls:
   R                      Reset view
   1-5                    Switch color scheme
   Tab                    Toggle BIP39 input focus
+  Stage0 field           Click to edit the stage-0 text (chain seed; [A-Z0-9-],
+                         show/hide toggle); seeds every fractal in the chain
   Enter                  Encode seed (when input focused)
   C                      Clear encoded points
   D                      Toggle debug mode (show hex logs)
@@ -29,7 +31,6 @@ import sys
 import os
 import ctypes
 import math
-import hashlib
 import signal
 
 os.environ.setdefault("SDL_VIDEODRIVER", "x11")
@@ -102,8 +103,9 @@ from manual_mode import (
 def params_dict_from_tuple(params):
     """Build a stage param dict from the 9-tuple returned by the protocol.
 
-    ``params`` is ``(o, o_re, o_im, p, p_re, p_im, q, q_re, q_im)`` or None
-    (canonical stage).  Returns the dict {"o","o_re",...} or None.
+    ``params`` is ``(o, o_re, o_im, p, p_re, p_im, q, q_re, q_im)`` or None.
+    Returns the dict {"o","o_re",...} or None.  (Under protocol 0.3.0 every
+    point stage is derived, so a real stage always has params.)
     """
     if params is None:
         return None
@@ -122,7 +124,9 @@ def entropy_from_mnemonic(mnemonic_str):
 def populate_stages_from_results(state, stages):
     """Populate state.stages_* lists from a list of protocol.StageResult.
 
-    Mirrors the Enter-encode path: each stage holds exactly one point.
+    Mirrors the Enter-encode path: each point stage holds exactly one point.
+    Under protocol 0.3.0 every point stage is chain-derived, so every entry of
+    ``stages_params`` is populated (no canonical/None stage).
     """
     for sr in stages:
         i = sr.index
@@ -136,9 +140,10 @@ def populate_stages_from_results(state, stages):
 def encode_full_mnemonic(state):
     """Encode the full mnemonic into all stages via protocol.encode_entropy.
 
-    Drives the memory-hard chain (N-1 derivations) synchronously, populating
-    every per-stage list and the per-stage params.  Raises ValueError on a bad
-    mnemonic.  Returns the entropy bits.
+    Drives the memory-hard chain (N derivations, one per point stage)
+    synchronously, populating every per-stage list and the per-stage params.
+    Stage-0 text (``state.stage0_text``) seeds the chain.  Raises ValueError on
+    a bad mnemonic.  Returns the entropy bits.
     """
     entropy_bits = entropy_from_mnemonic(state.input_text)
     try:
@@ -147,7 +152,8 @@ def encode_full_mnemonic(state):
             raise ValueError
     except ValueError:
         iters = 0
-    stages = protocol.encode_entropy(entropy_bits, state.argon2_profile, iters)
+    stages = protocol.encode_entropy(
+        entropy_bits, state.stage0_text, state.argon2_profile, iters)
     populate_stages_from_results(state, stages)
     # The cumulative prior-point bits feeding the NEXT derivation are all
     # encoded bits (so a subsequent manual Argon2 step would be a no-op here).
@@ -191,9 +197,19 @@ class ViewerState:
         self.input_cursor = len(DEFAULT_BIP39_MNEMONIC)
         self.input_sel = self.input_cursor  # selection anchor (== cursor when no selection)
         self.input_focused = False
+        # Stage-0 text (protocol 0.3.0): the mandatory text-only stage that seeds
+        # the chain (salt or pepper).  Restricted to [A-Z0-9-]; hidden by default
+        # because it is frequently a pepper (a downstream secret).
+        self.stage0_text = ""
+        self.stage0_cursor = 0
+        self.stage0_focused = False
+        self.stage0_visible = False        # show/hide toggle (default hidden)
+        # Master-secret export label (a non-0 stage's [A-Z0-9-] export label).
+        # Reuses the former "salt" field slot; drives the Argon2id export.
         self.salt_text = ""
         self.salt_cursor = 0
         self.salt_focused = False
+        self.salt_visible = False
         self.status_msg = "Press S to select points, D for debug mode"
         self.status_color = CLR_NEUTRAL
 
@@ -276,12 +292,13 @@ class ViewerState:
         self.argon2_marker = ""             # e.g. "B0", "A100"
 
         # Per-stage fractal parameters live in self.stages_params (a dict per
-        # stage, or None for the canonical stage 0 / not-yet-derived stages);
-        # they are (re-)created by reset_stage_data().  The stage2_* names are
-        # kept as compatibility properties that read/write the ACTIVE stage's
-        # param dict so the unchanged panel/render/debug code keeps working.
+        # point stage, or None for not-yet-derived stages — every point stage is
+        # chain-derived in protocol 0.3.0); they are (re-)created by
+        # reset_stage_data().  The stage2_* names are kept as compatibility
+        # properties that read/write the ACTIVE stage's param dict so the
+        # unchanged panel/render/debug code keeps working.
 
-        # Active rendering stage index (0-based; 0 = canonical d=2).
+        # Active rendering stage index (0-based point stage).
         self.stage = 0
 
         # Brightness falloff (cave-exploration effect)
@@ -352,27 +369,35 @@ class ViewerState:
         self.stages_encoded_bits_chunks = [[] for _ in range(n)]
         self.stages_encoded_steps = [[] for _ in range(n)]
         self.stages_encoded_final_rects = [[] for _ in range(n)]
-        # Per-stage DERIVED params (element 0 is None — canonical).
+        # Per-stage DERIVED params (None until that stage is chain-derived;
+        # under protocol 0.3.0 every point stage — including index 0 — is
+        # derived, so there is no permanently-None "canonical" element).
         self.stages_params = [None] * n
         # Per-stage SELECTED (decode) data.
         self.stages_selected_points = [[] for _ in range(n)]
         self.stages_selected_steps = [[] for _ in range(n)]
         self.stages_selected_final_rects = [[] for _ in range(n)]
         self.stages_decoded_bits = [None] * n
-        # Active stage index (0-based; 0 = canonical d=2).
+        # Active stage index (0-based point stage; chain-derived from stage-0
+        # text).
         self.stage = 0
         # Cumulative prior-point bits feeding the NEXT derivation.
         self.argon2_stage1_bits = None
 
     def active_params(self):
-        """(o, p, q) uint64 for the active stage (canonical if not derived)."""
-        if self.stage == 0 or self.stages_params[self.stage] is None:
+        """(o, p, q) uint64 for the active stage.
+
+        Every point stage is chain-derived in protocol 0.3.0; until a stage has
+        been derived we fall back to the all-zero base params (o=p=q=0) only so
+        the viewport can render *something* before derivation completes.
+        """
+        if self.stages_params[self.stage] is None:
             return CANONICAL_O, CANONICAL_P, CANONICAL_Q
         d = self.stages_params[self.stage]
         return d["o"], d["p"], d["q"]
 
     def cur_param_dict(self):
-        """The active stage's param dict (or None for canonical/not derived)."""
+        """The active stage's param dict (or None if not yet derived)."""
         return self.stages_params[self.stage]
 
     def cumulative_bits_before(self, stage_idx):
@@ -569,8 +594,9 @@ def render_fractal(state, block_size=1):
     step = state.pixel_step()
     origin_re, origin_im = state.viewport_origin()
 
-    # Always use the perturbed formula with the active stage's params: stage 0
-    # is canonical (o=p=q=0); every later stage uses its chain-derived (o,p,q).
+    # Always use the perturbed formula with the active stage's params: every
+    # point stage uses its chain-derived (o,p,q) (o=p=q=0 base only as a
+    # pre-derivation rendering fallback — see active_params).
     o_val, p_val, q_val = state.active_params()
 
     if block_size <= 1:
@@ -999,6 +1025,50 @@ def draw_bisect_rects(screen, state, steps, final_rect, point_color,
             pygame.draw.rect(screen, point_color, leaf_rect, 3)
 
 
+def _draw_stage0_field(screen, state, small_font, y):
+    """Draw the right-aligned stage-0 text field + visibility toggle (row 1).
+
+    Mirrors the export-label field's structure.  The text is restricted to
+    [A-Z0-9-] (enforced in the keyboard handler) and masked unless the toggle
+    is on.  Sets ``state._stage0_rect`` and ``state._stage0_toggle_rect`` for
+    click handling.
+    """
+    field_w = 150
+    toggle_w = 20
+    label = small_font.render("Stage0:", True, (170, 170, 150))
+    toggle_x = state.win_w - 10 - toggle_w
+    field_x = toggle_x - 4 - field_w
+    label_x = field_x - 4 - label.get_width()
+
+    screen.blit(label, (label_x, y + 2))
+
+    field_rect = pygame.Rect(field_x, y, field_w, 20)
+    border = (255, 200, 100) if state.stage0_focused else (90, 90, 70)
+    pygame.draw.rect(screen, (28, 26, 18), field_rect)
+    pygame.draw.rect(screen, border, field_rect, 1)
+    shown = state.stage0_text or ""
+    if not state.stage0_visible:
+        shown = "•" * len(shown)
+    elif not shown and not state.stage0_focused:
+        shown = ""
+    txt = small_font.render(shown, True, (240, 230, 200))
+    screen.blit(txt, (field_x + 4, y + 2))
+    if state.stage0_focused:
+        blink = (pygame.time.get_ticks() // CURSOR_BLINK_MS) % 2 == 0
+        if blink:
+            cx = field_x + 4 + small_font.size(shown[:state.stage0_cursor])[0]
+            pygame.draw.line(screen, (240, 230, 200), (cx, y + 2), (cx, y + 16), 1)
+    state._stage0_rect = field_rect
+
+    toggle_rect = pygame.Rect(toggle_x, y, toggle_w, 20)
+    pygame.draw.rect(screen, (50, 50, 40), toggle_rect)
+    pygame.draw.rect(screen, (180, 180, 140), toggle_rect, 1)
+    eye = "o" if state.stage0_visible else "•"
+    eye_surf = small_font.render(eye, True, (220, 220, 160))
+    screen.blit(eye_surf, (toggle_x + 6, y + 2))
+    state._stage0_toggle_rect = toggle_rect
+
+
 def draw_panel(screen, state, font, small_font):
     """Draw the bottom control panel."""
     panel_y = state.vp_h
@@ -1014,7 +1084,9 @@ def draw_panel(screen, state, font, small_font):
         screen.blit(label, (x, y))
 
         input_x = x + label.get_width() + 8
-        input_w = state.win_w - input_x - 100
+        # Reserve room on the right for the Encode button (~85) and the
+        # right-aligned Stage-0 field + toggle (~240).
+        input_w = state.win_w - input_x - 100 - 240
         input_rect = pygame.Rect(input_x, y - 2, input_w, 22)
         border_color = (100, 180, 255) if state.input_focused else (80, 80, 100)
         pygame.draw.rect(screen, (20, 20, 30), input_rect)
@@ -1088,8 +1160,10 @@ def draw_panel(screen, state, font, small_font):
             state._copy_mnemonic_btn_rect = copy_rect
             sx += 86
 
-            # Salt input + SHA512 button
-            salt_lbl = small_font.render("Salt:", True, (150, 150, 170))
+            # Export-label input + master-secret Export button (protocol 0.3.0).
+            # The label is a non-0 stage's [A-Z0-9-] export label; it feeds the
+            # Argon2id master-secret export over the setup transcript.
+            salt_lbl = small_font.render("Label:", True, (150, 150, 170))
             screen.blit(salt_lbl, (sx, y + 2))
             sx += salt_lbl.get_width() + 4
             salt_fw = 120
@@ -1097,27 +1171,35 @@ def draw_panel(screen, state, font, small_font):
             salt_border = (100, 180, 255) if state.salt_focused else (80, 80, 100)
             pygame.draw.rect(screen, (20, 20, 30), salt_rect)
             pygame.draw.rect(screen, salt_border, salt_rect, 1)
-            salt_txt = small_font.render(state.salt_text or "", True, (220, 220, 240))
+            shown = state.salt_text or ""
+            if not getattr(state, "salt_visible", False):
+                shown = "•" * len(shown)
+            salt_txt = small_font.render(shown, True, (220, 220, 240))
             screen.blit(salt_txt, (sx + 4, y + 2))
             if state.salt_focused:
                 blink = (pygame.time.get_ticks() // CURSOR_BLINK_MS) % 2 == 0
                 if blink:
-                    cx = sx + 4 + small_font.size(state.salt_text[:state.salt_cursor])[0]
+                    cx = sx + 4 + small_font.size(shown[:state.salt_cursor])[0]
                     pygame.draw.line(screen, (220, 220, 240), (cx, y + 2), (cx, y + 16), 1)
             state._salt_rect = salt_rect
             sx += salt_fw + 4
-            sha_btn = pygame.Rect(sx, y, 56, 20)
+            sha_btn = pygame.Rect(sx, y, 60, 20)
             pygame.draw.rect(screen, (50, 90, 130), sha_btn)
             pygame.draw.rect(screen, (180, 220, 255), sha_btn, 1)
-            sha_txt = small_font.render("SHA512", True, (180, 220, 255))
+            sha_txt = small_font.render("Export", True, (180, 220, 255))
             screen.blit(sha_txt, (sx + 4, y + 2))
-            state._sha512_btn_rect = sha_btn
+            state._export_btn_rect = sha_btn
         else:
             info = small_font.render("Select points to decode fractal → BIP39", True, (120, 120, 140))
             screen.blit(info, (x, y + 2))
             state._copy_mnemonic_btn_rect = pygame.Rect(-100, -100, 0, 0)
             state._salt_rect = pygame.Rect(-100, -100, 0, 0)
-            state._sha512_btn_rect = pygame.Rect(-100, -100, 0, 0)
+            state._export_btn_rect = pygame.Rect(-100, -100, 0, 0)
+
+    # Stage-0 text field (protocol 0.3.0): the mandatory text-only stage that
+    # seeds the chain.  Drawn right-aligned on row 1 in both modes; restricted to
+    # [A-Z0-9-] with a show/hide toggle ("o"/"•") since it is frequently a pepper.
+    _draw_stage0_field(screen, state, small_font, y)
 
     # Row 2: Status + color scheme + mode
     y += 28
@@ -1352,22 +1434,17 @@ def draw_panel(screen, state, font, small_font):
     # right-side space.
     y += 22
     preset_label = (f"{state.size_preset} ({state.bip39_words} words / "
-                    f"{state.entropy_bits} bits / {state.n_stages} stages)")
+                    f"{state.entropy_bits} bits / {state.n_stages} point stages)")
     cur = state.cur_param_dict()
-    if state.stage == 0:
-        s2_txt = small_font.render(
-            f"[Stage 1/{state.n_stages} canonical] {preset_label}  "
-            f"(W cycle preset, T next stage)",
-            True, (180, 180, 180),
-        )
-    elif cur is not None:
+    if cur is not None:
         s2_txt = small_font.render(
             f"[Stage {state.stage + 1}/{state.n_stages} ACTIVE]  {preset_label}",
             True, (140, 255, 140),
         )
     else:
         s2_txt = small_font.render(
-            f"[Stage {state.stage + 1}/{state.n_stages} not derived]  {preset_label}",
+            f"[Stage {state.stage + 1}/{state.n_stages} not derived]  {preset_label}  "
+            f"(W cycle preset, T next stage)",
             True, (180, 220, 140),
         )
     screen.blit(s2_txt, (x, y + 2))
@@ -1654,8 +1731,50 @@ def main():
                         c = state.maxiter_cursor
                         state.maxiter_text = t[:c] + event.unicode + t[c:]
                         state.maxiter_cursor = c + 1
+                elif state.stage0_focused:
+                    # Stage-0 text editing — restricted to [A-Z0-9-] (protocol
+                    # 0.3.0): up-case typed letters, reject anything outside the
+                    # set, and signal the user when a restriction is applied so
+                    # the divergence is never silent.  Changing it invalidates any
+                    # encoded chain (the fractals derive from it).
+                    from encoding import normalize_stage_text
+                    if event.key in (pygame.K_ESCAPE, pygame.K_TAB, pygame.K_RETURN):
+                        state.stage0_focused = False
+                    elif event.key == pygame.K_BACKSPACE:
+                        if state.stage0_cursor > 0:
+                            t = state.stage0_text
+                            c = state.stage0_cursor
+                            state.stage0_text = t[:c-1] + t[c:]
+                            state.stage0_cursor = c - 1
+                    elif event.key == pygame.K_DELETE:
+                        t = state.stage0_text
+                        c = state.stage0_cursor
+                        if c < len(t):
+                            state.stage0_text = t[:c] + t[c+1:]
+                    elif event.key == pygame.K_LEFT:
+                        state.stage0_cursor = max(0, state.stage0_cursor - 1)
+                    elif event.key == pygame.K_RIGHT:
+                        state.stage0_cursor = min(len(state.stage0_text), state.stage0_cursor + 1)
+                    elif event.key == pygame.K_HOME:
+                        state.stage0_cursor = 0
+                    elif event.key == pygame.K_END:
+                        state.stage0_cursor = len(state.stage0_text)
+                    elif event.unicode and event.unicode.isprintable():
+                        norm, changed = normalize_stage_text(event.unicode)
+                        if norm:
+                            t = state.stage0_text
+                            c = state.stage0_cursor
+                            state.stage0_text = t[:c] + norm + t[c:]
+                            state.stage0_cursor = c + len(norm)
+                        if changed:
+                            state.status_msg = "Stage-0 text restricted to [A-Z0-9-] (up-cased / dropped)"
+                            state.status_color = CLR_WARNING
                 elif state.salt_focused:
-                    # Free-text editing for salt field
+                    # Export-label editing — restricted to [A-Z0-9-] (protocol
+                    # 0.3.0): up-case typed letters, reject anything outside the
+                    # set, and signal the user when a restriction is applied so
+                    # the divergence is never silent.
+                    from encoding import normalize_stage_text
                     if event.key in (pygame.K_ESCAPE, pygame.K_TAB, pygame.K_RETURN):
                         state.salt_focused = False
                     elif event.key == pygame.K_BACKSPACE:
@@ -1678,10 +1797,15 @@ def main():
                     elif event.key == pygame.K_END:
                         state.salt_cursor = len(state.salt_text)
                     elif event.unicode and event.unicode.isprintable():
-                        t = state.salt_text
-                        c = state.salt_cursor
-                        state.salt_text = t[:c] + event.unicode + t[c:]
-                        state.salt_cursor = c + 1
+                        norm, changed = normalize_stage_text(event.unicode)
+                        if norm:
+                            t = state.salt_text
+                            c = state.salt_cursor
+                            state.salt_text = t[:c] + norm + t[c:]
+                            state.salt_cursor = c + len(norm)
+                        if changed:
+                            state.status_msg = "Label restricted to [A-Z0-9-] (up-cased / dropped)"
+                            state.status_color = CLR_WARNING
                 elif state.debug_p_re_focused or state.debug_p_im_focused:
                     # Hex-only editing for debug perturbation fields
                     editing_re = state.debug_p_re_focused
@@ -1808,6 +1932,7 @@ def main():
                             state.argon2_iter_focused = False
                             state.maxiter_focused = False
                             state.salt_focused = False
+                            state.stage0_focused = False
                             state.debug_o_re_focused = False
                             state.debug_o_im_focused = False
                             state.debug_p_re_focused = False
@@ -1928,7 +2053,7 @@ def main():
                     elif event.key == pygame.K_s:
                         state.select_mode = not state.select_mode
                         if state.select_mode:
-                            # Start decoding from stage 0 (the canonical fractal).
+                            # Start decoding from the first point stage (chain-derived).
                             state.stage = 0
                             cache_clear_stage2()
                             state.select_active_idx = 0
@@ -1965,7 +2090,7 @@ def main():
                             cache_clear_stage2()
                             cur = state.cur_param_dict()
                             if state.stage == 0:
-                                state.status_msg = f"Stage 1/{n} (canonical d=2)"
+                                state.status_msg = f"Stage 1/{n}"
                                 state.status_color = CLR_NEUTRAL
                             elif state.debug_mode and cur is not None:
                                 state.status_msg = (
@@ -2238,6 +2363,8 @@ def main():
                         state.argon2_iter_focused = True
                         state.input_focused = False
                         state.maxiter_focused = False
+                        state.stage0_focused = False
+                        state.salt_focused = False
                         state.debug_o_re_focused = False
                         state.debug_o_im_focused = False
                         state.debug_p_re_focused = False
@@ -2263,7 +2390,7 @@ def main():
                     elif hasattr(state, '_select_btn_rect') and state._select_btn_rect.collidepoint(mx, my):
                         state.select_mode = not state.select_mode
                         if state.select_mode:
-                            # Start decoding from stage 0 (the canonical fractal).
+                            # Start decoding from the first point stage (chain-derived).
                             state.stage = 0
                             cache_clear_stage2()
                             state.select_active_idx = 0
@@ -2375,8 +2502,7 @@ def main():
                             p_re, p_im = decode_p_display(p)
                             q_re, q_im = decode_q_display(q)
                             # Apply the manual (o,p,q) to the next stage after the
-                            # active one (or stage 1 if currently on canonical 0),
-                            # and make it active.
+                            # active one, and make it active.
                             target = state.stage + 1 if state.stage + 1 < state.n_stages else state.stage
                             if target == 0:
                                 target = min(1, state.n_stages - 1)
@@ -2400,8 +2526,12 @@ def main():
                             except Exception as e:
                                 state.status_msg = f"Clipboard error: {e}"
                                 state.status_color = CLR_ERROR
-                    elif hasattr(state, '_salt_rect') and state._salt_rect.collidepoint(mx, my):
-                        state.salt_focused = True
+                    elif hasattr(state, '_stage0_toggle_rect') and state._stage0_toggle_rect.collidepoint(mx, my):
+                        # Show/hide toggle for the stage-0 text (pepper masking).
+                        state.stage0_visible = not state.stage0_visible
+                    elif hasattr(state, '_stage0_rect') and state._stage0_rect.collidepoint(mx, my):
+                        state.stage0_focused = True
+                        state.salt_focused = False
                         state.input_focused = False
                         state.argon2_iter_focused = False
                         state.maxiter_focused = False
@@ -2411,20 +2541,56 @@ def main():
                         state.debug_p_im_focused = False
                         state.debug_q_re_focused = False
                         state.debug_q_im_focused = False
-                    elif hasattr(state, '_sha512_btn_rect') and state._sha512_btn_rect.collidepoint(mx, my):
-                        if state.decoded_mnemonic:
+                        state.stage0_cursor = len(state.stage0_text)
+                    elif hasattr(state, '_salt_rect') and state._salt_rect.collidepoint(mx, my):
+                        state.salt_focused = True
+                        state.stage0_focused = False
+                        state.input_focused = False
+                        state.argon2_iter_focused = False
+                        state.maxiter_focused = False
+                        state.debug_o_re_focused = False
+                        state.debug_o_im_focused = False
+                        state.debug_p_re_focused = False
+                        state.debug_p_im_focused = False
+                        state.debug_q_re_focused = False
+                        state.debug_q_im_focused = False
+                    elif hasattr(state, '_export_btn_rect') and state._export_btn_rect.collidepoint(mx, my):
+                        # Master-secret export (protocol 0.3.0): one Argon2id
+                        # pass over the reproducible setup transcript (stage-0
+                        # text, iteration count, per-stage params + leaf-centres,
+                        # and the exporting stage's [A-Z0-9-] label).
+                        from encoding import normalize_stage_text
+                        records = []
+                        for i in range(state.n_stages):
+                            pd = state.stages_params[i]
+                            rects = state.stages_encoded_final_rects[i]
+                            if pd is None or not rects:
+                                break
+                            rect = rects[0]
+                            leaf_re = protocol._midpoint(rect.re_min, rect.re_max)
+                            leaf_im = protocol._midpoint(rect.im_min, rect.im_max)
+                            records.append((pd["o"], pd["p"], pd["q"], leaf_re, leaf_im))
+                        if not records:
+                            state.status_msg = "Encode a setup before exporting"
+                            state.status_color = CLR_WARNING
+                        else:
                             try:
-                                data = (state.decoded_mnemonic + state.salt_text).encode("utf-8")
-                                digest = hashlib.sha512(data).hexdigest()
-                                copy_to_clipboard(digest)
-                                state.status_msg = f"SHA512 copied: {digest[:32]}..."
+                                iters = int(state.argon2_iterations or 0)
+                            except ValueError:
+                                iters = 0
+                            label, _c = normalize_stage_text(state.salt_text)
+                            try:
+                                raw = protocol.export_master_secret(
+                                    state.stage0_text, iters, records, label)
+                                secret = protocol.master_secret_display(raw)
+                                copy_to_clipboard(secret)
+                                state.status_msg = (
+                                    f"Master secret copied (stage {len(records)}): "
+                                    f"{secret}")
                                 state.status_color = CLR_SUCCESS
                             except Exception as e:
-                                state.status_msg = f"SHA512 error: {e}"
+                                state.status_msg = f"Export error: {e}"
                                 state.status_color = CLR_ERROR
-                        else:
-                            state.status_msg = "No mnemonic to hash"
-                            state.status_color = CLR_WARNING
                     elif hasattr(state, '_scheme_rects'):
                         for i, r in enumerate(state._scheme_rects):
                             if r.collidepoint(mx, my):
@@ -2435,6 +2601,8 @@ def main():
                         state.maxiter_focused = True
                         state.input_focused = False
                         state.argon2_iter_focused = False
+                        state.stage0_focused = False
+                        state.salt_focused = False
                         state.debug_p_re_focused = False
                         state.debug_p_im_focused = False
                     continue

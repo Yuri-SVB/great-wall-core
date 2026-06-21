@@ -125,6 +125,44 @@ pub fn argon2_single(input: &[u8], profile: Profile) -> [u8; ARGON2_HASH_LEN] {
     digest
 }
 
+// --- Master-secret export profile (protocol 0.3.0) ---
+//
+// The master-secret export (DESIGN.md "Master-Secret Export") is a single
+// Argon2id pass over the reproducible setup transcript.  Unlike the inter-stage
+// chain (Argon2d, per-profile memory), the export uses fixed, modest parameters
+// so it runs on commodity hardware and tolerates large outputs/peppers without
+// entropy collapse:
+//
+//   type = Argon2id, m = 2^16 KiB (64 MiB), p = 2, t = 8, salt = b"greatwall".
+//
+// Argon2id (not Argon2d): the data-independent first half resists side channels
+// on a possibly-shared pepper, while the data-dependent remainder keeps the
+// memory gate.  The output length is caller-chosen (l = 1024 in the protocol);
+// excess output is simply ignored by the consumer.
+const MASTER_MEMORY_KIB: u32 = 65_536;   // 2^16 KiB = 64 MiB
+const MASTER_TIME_COST: u32 = 8;
+const MASTER_PARALLELISM: u32 = 2;
+
+/// Run the master-secret export: one Argon2id pass over the setup transcript.
+///
+/// - `message`: the reproducible setup transcript (stage-0 text, iteration
+///   count, per-stage params + leaf-centres, and the exporting stage's label).
+/// - `out`: caller-provided output buffer; its length is the Argon2 output
+///   length `l` (the protocol uses 1024 bytes).
+///
+/// Uses the fixed salt `b"greatwall"` — the same fixed salt as the inter-stage
+/// chain — so all per-setup uniqueness is carried by the message.
+pub fn argon2id_master(message: &[u8], out: &mut [u8]) {
+    let params = Params::new(
+        MASTER_MEMORY_KIB, MASTER_TIME_COST, MASTER_PARALLELISM, Some(out.len()),
+    )
+    .expect("valid Argon2id master params");
+    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+    argon2
+        .hash_password_into(message, ARGON2_SALT, out)
+        .expect("Argon2id master hash failed");
+}
+
 /// Run iterative Argon2d hashing (bulk, no progress).
 ///
 /// - `input`: 8 bytes (64 bits of stage-1 entropy)

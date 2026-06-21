@@ -1,10 +1,11 @@
 {
   "version": "0.1.0",
-  "protocol_version": "0.2.0",
+  "protocol_version": "0.3.0",
   "input": {
     "entropy_hex": "ffffffffffffffffffffffffffffffff",
     "entropy_bits": 128,
     "bip39_mnemonic": "zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong",
+    "stage0_text": "",
     "argon2_profile": "b",
     "argon2_iterations": 0,
     "gw_mode": "d",
@@ -14,34 +15,36 @@
   "stages": [
     {
       "index": 0,
-      "canonical": true,
       "params": {
-        "o": "0x0000000000000000",
-        "p": "0x0000000000000000",
-        "q": "0x0000000000000000",
-        "o_re": 0.0,
-        "o_im": 0.0,
-        "p_re": 0.0,
-        "p_im": 0.0,
-        "q_re": 0.0,
-        "q_im": 0.0
+        "o": "0x66687AADF862BD77",
+        "p": "0x6C8FC18B8E9F8E20",
+        "q": "0x089714856EE233B3",
+        "o_re": -0.23314389761071652,
+        "o_im": 0.17711672780569643,
+        "p_re": -0.12717051384970546,
+        "p_im": 0.22730244108242914,
+        "q_re": 0.05024364389828406,
+        "q_im": 0.039345655823126435
       },
-      "argon2": null,
+      "argon2": {
+        "input_hex": "",
+        "iterations": 0,
+        "final_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
       "leaf": {
-        "re_min": "0x0CD19BCB4D55855E",
-        "re_max": "0x0CD19BFF34E06C3A",
-        "im_min": "0xE8AE733CBF20DE59",
-        "im_max": "0xE8AE7387877A1331",
-        "re_min_f64": 0.8011739675033324,
-        "re_max_f64": 0.8011741608625256,
-        "im_min_f64": -1.4574096324049113,
-        "im_max_f64": -1.4574093538179753,
-        "path": "OrdrDRDRDRDRDRDrDRDRDRDRDrdDRRddr"
+        "re_min": "0x102376E5CE927D14",
+        "re_max": "0x10237819840A3025",
+        "im_min": "0xEC4C78AB8A10E948",
+        "im_max": "0xEC4C795630B0D316",
+        "re_min_f64": 1.0086583115418357,
+        "re_max_f64": 1.0086594578466581,
+        "im_min_f64": -1.2313302325482647,
+        "im_max_f64": -1.231329596824206,
+        "path": "OrdRDRDRdRdRdRdrDRdRDRdrRdrDrDrdD"
       }
     },
     {
       "index": 1,
-      "canonical": false,
       "params": {
         "o": "0x4C13016A7B3D2210",
         "p": "0xE1FC05016BE996B5",
@@ -72,7 +75,6 @@
     },
     {
       "index": 2,
-      "canonical": false,
       "params": {
         "o": "0x3F41425439D6B0FE",
         "p": "0xA00CF2F3551BAFCA",
@@ -103,7 +105,6 @@
     },
     {
       "index": 3,
-      "canonical": false,
       "params": {
         "o": "0x5A72C41185149A10",
         "p": "0x5035B49B43CA0222",

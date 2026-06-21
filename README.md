@@ -1,20 +1,33 @@
 # Great Wall Reference Implementation
 
 Bijective mapping between BIP39 mnemonic seeds and Burning Ship fractal
-locations, with an Argon2-based chained pipeline: one 32-bit point per
-stage, each stage its own fractal derived by hashing all preceding points.
+locations, with an Argon2-based chained pipeline: a mandatory text-only
+**stage 0** seeds the chain, then one 32-bit point per later stage, each stage
+its own fractal derived by hashing stage-0 text plus all preceding points.
 
 > **Design documentation** for the encoder lives in the `great-wall-docs`
 > repository (`great-wall-core/DESIGN.md`) — the single source of truth. This
 > README is the only doc kept in this repo.
 >
 > **Versioning guarantee.** This core implements **chained protocol
-> `PROTOCOL_VERSION = 0.2.0`** (see `burning_ship/protocol.py`), and the
+> `PROTOCOL_VERSION = 0.3.0`** (see `burning_ship/protocol.py`), and the
 > authoritative `DESIGN.md` declares the *same* version. The two are therefore
 > verifiably in sync: bump the protocol version in both — and re-stamp the
 > encode/decode JSON `protocol_version` field — whenever the protocol's
 > behaviour changes. (This is independent of the Rust `ENGINE_VERSION`, the
 > single-fractal encode/decode algorithm, which is unchanged at `0.1.0`.)
+>
+> **What's new in `0.3.0`** (hard, backward-incompatible — `0.2.0` encodings do
+> not round-trip across it):
+> 1. A **mandatory, point-less stage 0** carries only a short text input and is
+>    chained into stage 1, so **there is no longer a public "canonical" first
+>    fractal** — every point-bearing fractal is private and chain-derived.
+> 2. Stage-0 text (and every non-0 stage's export label) is **restricted to
+>    `[A-Z0-9-]`** for safe cross-device round-tripping, and doubles as a
+>    **salt** (a label like `MAIN-STASH`) or a **pepper** (build one setup over
+>    another).
+> 3. The master-secret carry-over is no longer `SHA512(seedphrase ‖ text)`; it
+>    is a single **Argon2id** pass over the reproducible setup transcript.
 >
 > **Pre-1.0 / test-vector policy.** The protocol is pre-`1.0.0` (unstable;
 > more changes are expected — new parameter families, etc.). Comprehensive
@@ -65,17 +78,19 @@ cannot dictate them to someone else. There is no verbal shortcut: the
 only way to extract the secret is to sit in front of the fractal and
 point.
 
-Great Wall splits your secret into one 32-bit point per stage. The first
-point is encoded on the standard (canonical) fractal. But before *each*
-later point can be encoded *or decoded*, the system requires a long,
-memory-intensive computation using Argon2 — a key-stretching algorithm
-where each step depends on the previous one (strictly sequential) and
+Great Wall begins with a text-only **stage 0** — a short label (`MAIN-STASH`,
+`RETIREMENT`) or a pepper — and then splits your secret into one 32-bit point
+per later stage. Before *each* point can be encoded *or decoded*, the system
+requires a long, memory-intensive computation using Argon2 — a key-stretching
+algorithm where each step depends on the previous one (strictly sequential) and
 requires gigabytes of RAM that cannot be traded for speed. The delay is
 configurable: hours, days, or weeks. Each computation produces a unique key
-that reshapes the fractal itself — generating a *new, private* labyrinth —
-and its input is **all the preceding points**, so the labyrinths form a
-chain: stage *k+1*'s fractal cannot even be derived until stage *k*'s point
-is fixed.
+that reshapes the fractal itself — generating a *new, private* labyrinth — and
+its input is **stage-0 text plus all the preceding points**, so the labyrinths
+form a chain that begins at stage-0 text: even the first point's fractal depends
+on your stage-0 label, and stage *k+1*'s fractal cannot even be derived until
+stage *k*'s point is fixed. There is **no public fractal** an attacker can know
+in advance.
 
 Each next-stage fractal **does not exist** until its computation finishes.
 No one — not even a fully cooperative user — can reveal the later locations
@@ -87,7 +102,7 @@ locations (tacit knowledge), and the later-stage fractals **cannot be
 materialized** without completing the full Argon2 chain. Coercing the user
 into giving up the entire secret effectively requires kidnapping them for at
 least as long as the total Argon2 delay — and that delay compounds across the
-chain (one memory-hard derivation per secret stage). That is the wall.
+chain (one memory-hard derivation per point stage). That is the wall.
 
 ## Burning Ship Seed Encoder (`burning_ship/`)
 
@@ -95,21 +110,24 @@ Bijective mapping between BIP39 mnemonic seeds and locations in the
 Burning Ship fractal, using I4F60 fixed-point arithmetic (60 fractional
 bits, range [-8, +8)).
 
-Because the protocol uses exactly one 32-bit point per stage,
-`stages = entropy_bits / 32 = words / 3`, so **every** BIP39 size that is a
-multiple of 32 bits is supported uniformly — one extra stage per extra 32 bits
-(3 words). All sizes from 32 to a hard cap of **256 bits** are offered:
+Because the protocol uses exactly one 32-bit point per (later) stage,
+`N = entropy_bits / 32 = words / 3` point stages atop a mandatory, point-less
+stage 0 (total stages `N + 1`), so **every** BIP39 size that is a multiple of
+32 bits is supported uniformly — one extra point stage per extra 32 bits
+(3 words). All sizes from 32 to a hard cap of **256 bits** are offered, and
+**every** point stage's fractal is secret and chain-derived (there is no
+canonical fractal):
 
-| Words | Entropy | Stages | Secret fractals | Tier |
-|------:|--------:|-------:|----------------:|------|
-| 3     | 32      | 1      | 0               | sub-standard |
-| 6     | 64      | 2      | 1               | sub-standard |
-| 9     | 96      | 3      | 2               | sub-standard |
-| 12    | 128     | 4      | 3               | standard (default) |
-| 15    | 160     | 5      | 4               | standard |
-| 18    | 192     | 6      | 5               | standard |
-| 21    | 224     | 7      | 6               | standard |
-| 24    | 256     | 8      | 7               | standard |
+| Words | Entropy | Point stages (N) | Total stages (incl. stage 0) | Tier |
+|------:|--------:|-----------------:|-----------------------------:|------|
+| 3     | 32      | 1                | 2                            | sub-standard |
+| 6     | 64      | 2                | 3                            | sub-standard |
+| 9     | 96      | 3                | 4                            | sub-standard |
+| 12    | 128     | 4                | 5                            | standard (default) |
+| 15    | 160     | 5                | 6                            | standard |
+| 18    | 192     | 6                | 7                            | standard |
+| 21    | 224     | 7                | 8                            | standard |
+| 24    | 256     | 8                | 9                            | standard |
 
 **Hard cap at 256 bits / 24 words.** Larger mnemonics are valid BIP39 in
 principle but are deliberately *not* offered: one more stage is the same
@@ -132,8 +150,9 @@ Users are encouraged to set the time **conservatively (≈2×)** and then use th
 TLP / jade-clock layer (see the `great-wallet` family) to tune the effective
 per-session delay. Official policy; may be revisited.
 
-**A note on the 32-bit (3-word, single-stage) mode.** With only one point it
-has only the first (canonical) stage and no memory-hard chain, so its
+**A note on the 32-bit (3-word, single-point) mode.** With stage 0 plus a single
+point stage, it still runs the memory-hard chain — stage 1's fractal is derived
+from stage-0 text — so even here there is **no public canonical surface**. Its
 coercion-resistance is *minimal but still nonzero*: a wrench attacker who lacks
 a Great Wall–compatible app still fails, and the setup outperforms the
 brute-force resistance of a 9-decimal-digit PIN. It is offered for completeness;
@@ -211,6 +230,7 @@ python3 test_vectors.py --verbose
 | `P`                      | Cycle escape-count transform (Identity/Square/Cube/Exp/Sqrt/Cbrt/Log) |
 | `L`                      | Toggle brightness falloff (sigmoid cave-like dimming) |
 | `Tab`                    | Focus BIP39 text input              |
+| Stage-0 field (click)    | Edit the stage-0 text (chain seed; `[A-Z0-9-]`, show/hide toggle) |
 | `Enter`                  | Encode BIP39 seed (when input focused) |
 | `C`                      | Clear all encoded/decoded points    |
 | `D`                      | Toggle debug mode (show hex fields, verbose info) |
@@ -230,24 +250,54 @@ python3 test_vectors.py --verbose
 | `Escape` / `Q`           | Quit                                |
 | `Ctrl+C` / `Ctrl+V`     | Copy / Paste in text fields         |
 
-### Chained Pipeline (one point per stage)
+### Chained Pipeline (stage-0 text, one point per later stage)
 
-The entropy is split into `n_stages = entropy_bits / 32` chunks of 32 bits,
-one point per stage.
+The setup opens with a text-only **stage 0** (a `[A-Z0-9-]` label/pepper); the
+entropy is then split into `N = entropy_bits / 32` chunks of 32 bits, one point
+per later stage.
 
-**Stage 0** encodes its point using the canonical Burning Ship formula
-(o=0, p=0, q=0).
-
-**Stage k ≥ 1** encodes its point using a perturbed formula whose parameters
-(o, p, q) are derived by hashing **all preceding points** with Argon2
-(configurable profile and iteration count) then SHA-256 — a different fractal
-with a different area tree for every stage. Because each derivation consumes
-the whole prefix, the stages form a strict chain, and the honest derivation
-cost is one memory-hard Argon2 run per secret stage (`n_stages − 1` total).
+**Every point stage** (including the first) encodes its point on a perturbed
+fractal whose parameters (o, p, q) are derived by hashing **stage-0 text plus
+all preceding points** with Argon2 (configurable profile and iteration count)
+then SHA-256 — a different fractal with a different area tree for every stage.
+Because each derivation consumes stage-0 text and the whole prior-point prefix,
+the stages form a strict chain that begins at stage-0 text, and the honest
+derivation cost is one memory-hard Argon2 run per point stage (`N` total). There
+is no canonical fractal.
 
 The chained pipeline lives in `burning_ship/protocol.py`
 (`encode_entropy` / `decode_entropy` / `stage_params`); the CLI and viewer
 both drive encode/decode through it.
+
+### CLI
+
+```bash
+cd burning_ship
+
+# Encode (stage-0 text seeds the chain); optionally export a master secret
+python3 cli.py encode --bip39 "abandon abandon ... able" \
+    --stage0-text MAIN-STASH --profile b --iterations 3 --mode m \
+    --export-label SIGNING-1
+
+# Decode a stage document back to entropy / mnemonic
+python3 cli.py decode --input out.json
+
+# Master-secret export from an existing encode document, at any point stage
+python3 cli.py master --input out.json --export-label 2026-06-19 --export-stage 2
+```
+
+### Master-Secret Export (Argon2id over the setup transcript)
+
+A setup can export a **master secret** for blind hand-off (paste into another
+wallet, derive a non-BIP39 seed, or act as the *pepper* of a downstream setup).
+As of `0.3.0` this is a single **Argon2id** pass (m = 64 MiB, t = 8, p = 2,
+fixed salt `b"greatwall"`, output 1024 bytes) over the reproducible setup
+transcript: stage-0 text, the iteration count, and — for every point stage up
+to and including the exporting stage — its derived params and the centre of its
+encoded point's leaf rectangle, with the exporting stage's own `[A-Z0-9-]` label
+appended to the message. It is available at **every** non-0 stage without
+completing later stages. *(Output-size ergonomics are deferred: for now the
+export surfaces the first 32 hex characters of the Argon2id output.)*
 
 ### Argon2 Intermediate-State Checkpoints
 
@@ -311,15 +361,18 @@ punitive — you can:
 - Click again on a slot you already filled to **overwrite** it.
 
 Each stage holds a single point; once it is validly placed, its 32 bits are
-decoded automatically, the next stage's fractal is derived from the cumulative
-decoded bits, and selection advances to that stage. After the last stage, the
-full BIP39 mnemonic is assembled.
+decoded automatically, the next stage's fractal is derived from stage-0 text
+plus the cumulative decoded bits, and selection advances to that stage. After
+the last stage, the full BIP39 mnemonic is assembled.
 
-### Salt & SHA512
+### Stage-0 Text & Master-Secret Export
 
-When a BIP39 mnemonic is decoded, a salt input field and SHA512 button
-appear. Enter a salt string and click SHA512 to compute
-`SHA-512(mnemonic + salt)` — the hex digest is copied to the clipboard.
+A stage-0 text field seeds the chain; it is restricted to `[A-Z0-9-]` (the field
+up-cases typed letters and rejects characters outside the set, signalling the
+user when a restriction is applied) and offers a show/hide toggle because the
+text is frequently a pepper. When a BIP39 mnemonic is decoded, a master-secret
+export (Argon2id over the setup transcript) is available; the resulting secret
+is copied to the clipboard. (This replaces the `0.2.0` salt + `SHA512` button.)
 
 ### Session Save/Load
 
@@ -368,6 +421,6 @@ assert bits == decoded
 ### Precision Limits
 
 With I4F60 (60 fractional bits), the encoder reliably handles **32 bits
-per point**. Since the protocol uses exactly one point per stage, a 12-word
-BIP39 seed (128 entropy bits) uses 4 stages and a 24-word seed (256 bits)
-uses 8 stages — one 32-bit point each.
+per point**. Since the protocol uses exactly one point per later stage, a
+12-word BIP39 seed (128 entropy bits) uses 4 point stages and a 24-word seed
+(256 bits) uses 8 point stages — one 32-bit point each — atop stage 0.

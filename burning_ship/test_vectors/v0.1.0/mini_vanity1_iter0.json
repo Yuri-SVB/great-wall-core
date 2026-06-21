@@ -1,10 +1,11 @@
 {
   "version": "0.1.0",
-  "protocol_version": "0.2.0",
+  "protocol_version": "0.3.0",
   "input": {
     "entropy_hex": "951df7837eb13d5a",
     "entropy_bits": 64,
     "bip39_mnemonic": "never use this word because pudding",
+    "stage0_text": "",
     "argon2_profile": "b",
     "argon2_iterations": 0,
     "gw_mode": "m",
@@ -14,34 +15,36 @@
   "stages": [
     {
       "index": 0,
-      "canonical": true,
       "params": {
-        "o": "0x0000000000000000",
-        "p": "0x0000000000000000",
-        "q": "0x0000000000000000",
-        "o_re": 0.0,
-        "o_im": 0.0,
-        "p_re": 0.0,
-        "p_im": 0.0,
-        "q_re": 0.0,
-        "q_im": 0.0
+        "o": "0x66687AADF862BD77",
+        "p": "0x6C8FC18B8E9F8E20",
+        "q": "0x089714856EE233B3",
+        "o_re": -0.23314389761071652,
+        "o_im": 0.17711672780569643,
+        "p_re": -0.12717051384970546,
+        "p_im": 0.22730244108242914,
+        "q_re": 0.05024364389828406,
+        "q_im": 0.039345655823126435
       },
-      "argon2": null,
+      "argon2": {
+        "input_hex": "",
+        "iterations": 0,
+        "final_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
       "leaf": {
-        "re_min": "0x090CEA8BE71B5F40",
-        "re_max": "0x090CEA91A6718FB2",
-        "im_min": "0xF01A7C46B4794B18",
-        "im_max": "0xF01A7C4C313BCDDF",
-        "re_min_f64": 0.5656533684684388,
-        "re_max_f64": 0.5656533898792054,
-        "im_min_f64": -0.9935338247382053,
-        "im_max_f64": -0.9935338042962596,
-        "path": "OrULdLruRulURdrurdrRdurrdrlUUludD"
+        "re_min": "0x0875F7685FF26A53",
+        "re_max": "0x0875F864E082D132",
+        "im_min": "0xF33E64F3E786D153",
+        "im_max": "0xF33E66B2B9FFFEEB",
+        "re_min_f64": 0.5288003995075551,
+        "re_max_f64": 0.5288013401515637,
+        "im_min_f64": -0.7972670052036609,
+        "im_max_f64": -0.7972653406613974,
+        "path": "OrUURldURulURDruRdrdRurDrdLULuLDR"
       }
     },
     {
       "index": 1,
-      "canonical": false,
       "params": {
         "o": "0x8870023505270EEF",
         "p": "0xC7CE9BD73827EDE2",

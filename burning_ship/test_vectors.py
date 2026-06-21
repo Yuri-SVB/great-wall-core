@@ -47,6 +47,9 @@ def run_encode(vector_doc):
         "--profile", inp["argon2_profile"],
         "--iterations", str(inp["argon2_iterations"]),
         "--mode", inp["gw_mode"],
+        # Stage-0 text seeds the chain (protocol 0.3.0); pass it through so the
+        # re-encode reproduces the frozen vector exactly.
+        "--stage0-text", inp.get("stage0_text", ""),
     ]
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
     if result.returncode != 0:
@@ -154,9 +157,13 @@ def test_round_trip(vector_path, verbose=False):
 def test_cross_mode(vectors_dir, verbose=False):
     """Test that the first stage's leaf is identical across mini/default/large.
 
-    Stage 0 is the canonical fractal and its 32-bit point depends only on the
-    first 32 entropy bits, which are identical for the all-zero "abandon"
-    mnemonics across presets — so the first leaf must match.
+    Under protocol 0.3.0 the first point stage's fractal derives from stage-0
+    text plus the (empty) prior-point prefix.  These vectors use an empty
+    stage-0 text, so the first stage's params are identical across presets, and
+    its 32-bit point depends only on the first 32 entropy bits — which are
+    identical for the all-zero "abandon" mnemonics across presets.  Hence the
+    first leaf must match.  (There is no canonical fractal anymore; the match
+    comes from a shared stage-0 text + shared first chunk, not from o=p=q=0.)
     """
     patterns = [
         ("mini_abandon_iter0.json", "default_abandon_iter0.json", "large_abandon_iter0.json"),
@@ -246,7 +253,8 @@ def test_meta_leaf_membership(vectors_dir, verbose=False):
         print("  SKIP  meta-leaf-membership: no iter0 vectors")
         return True
     doc = json.load(open(os.path.join(vectors_dir, cands[0])))
-    leaf = doc["stages"][0]["leaf"]
+    stage0 = doc["stages"][0]
+    leaf = stage0["leaf"]
     rmn, rmx = _parse_hex_i64(leaf["re_min"]), _parse_hex_i64(leaf["re_max"])
     imn, imx = _parse_hex_i64(leaf["im_min"]), _parse_hex_i64(leaf["im_max"])
     if rmx <= rmn or imx <= imn:
@@ -258,13 +266,18 @@ def test_meta_leaf_membership(vectors_dir, verbose=False):
     cre, cim = _midpoint_i64(rmn, rmx), _midpoint_i64(imn, imx)
 
     # Ground the boundaries in the real engine: decoding the center must land in
-    # exactly the recorded leaf (stage 0 is canonical, o=p=q=0).
+    # exactly the recorded leaf.  Stage 0 is chain-derived (protocol 0.3.0), so
+    # we decode with the stage's OWN stored (o, p, q), not o=p=q=0.
+    p0 = stage0["params"]
+    o0 = _parse_hex_i64(p0["o"]) if isinstance(p0["o"], str) else p0["o"]
+    pp0 = _parse_hex_i64(p0["p"]) if isinstance(p0["p"], str) else p0["p"]
+    q0 = _parse_hex_i64(p0["q"]) if isinstance(p0["q"], str) else p0["q"]
     try:
         from burning_ship_engine import decode_full
         from constants import ENCODE_AREA, GUI_PARAMS, BITS_PER_POINT
         _b, lr, _valid, _p = decode_full(
             cre, cim, BITS_PER_POINT, area=ENCODE_AREA, params=GUI_PARAMS,
-            o=0, p=0, q=0, path_prefix="O")
+            o=o0, p=pp0, q=q0, path_prefix="O")
         if (lr.re_min, lr.re_max, lr.im_min, lr.im_max) != (rmn, rmx, imn, imx):
             print("  FAIL  meta-leaf-membership: engine leaf != recorded leaf")
             return False

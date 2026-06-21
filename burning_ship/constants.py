@@ -9,6 +9,7 @@ import them without pulling in pygame or heavy dependencies.
 from burning_ship_engine import (
     DiscoveryParams, Rect,
     PROFILE_BASIC, PROFILE_ADVANCED, PROFILE_GREAT_WALL,
+    ARGON2ID_MASTER_OUTPUT_BYTES,
 )
 
 # ---------------------------------------------------------------------------
@@ -92,16 +93,19 @@ Q_SIGN_BIT_RE = 31
 Q_SIGN_BIT_IM = 63
 Q_MAGNITUDE_MIN_EXP = 5
 
-# Canonical (first-stage) fixed parameters: all three set to 0 yields the
-# canonical Burning Ship formula (z₀=0, no additive shift, no linear term).
-# The first stage of the chain is always this public, canonical fractal — it
-# is not a secret haystack the attacker must find.  Names are kept as
-# STAGE1_* (the first, 1-indexed stage) for continuity with the rest of the
-# code; CANONICAL_* aliases are provided for clarity.
+# Base (all-zero) parameters: o=p=q=0 yields the unperturbed Burning Ship
+# formula (z₀=0, no additive shift beyond p's baseline, no linear term).
+#
+# NOTE (protocol 0.3.0): this is *no longer a privileged "canonical" first
+# fractal*.  Every point stage — including the first — derives its (o, p, q)
+# from the memory-hard chain seeded by stage-0 text (see protocol.py), so there
+# is no public surface an attacker knows in advance.  These constants are kept
+# only for the DEPRECATED two-stage helpers in encoding.py; the live pipeline
+# never uses them.
 STAGE1_O = 0   # o=0 ⇒ orbit seed z₀ = 0
 STAGE1_P = 0   # p=0 ⇒ additive shift only the baseline (+1/8, +1/8)
 STAGE1_Q = 0   # q=0 ⇒ no εz term
-CANONICAL_O = STAGE1_O
+CANONICAL_O = STAGE1_O   # back-compat alias (deprecated; see note above)
 CANONICAL_P = STAGE1_P
 CANONICAL_Q = STAGE1_Q
 
@@ -110,6 +114,22 @@ CANONICAL_Q = STAGE1_Q
 # ---------------------------------------------------------------------------
 
 ARGON2_INPUT_BYTES = 8
+
+# ---------------------------------------------------------------------------
+# Master-secret export (protocol 0.3.0)
+# ---------------------------------------------------------------------------
+#
+# The master-secret export is a single Argon2id pass over the reproducible setup
+# transcript (DESIGN.md "Master-Secret Export"): Argon2id, m = 2^16 KiB (64 MiB),
+# p = 2, t = 8, fixed salt b"greatwall", output l = 1024 bytes.  The Argon2id
+# parameters live in the Rust engine (argon2_hash.rs::argon2id_master);
+# ARGON2ID_MASTER_OUTPUT_BYTES (the output length l) is re-exported here.
+#
+# Output-size ergonomics (TODO, deferred): 1024 bytes is unwieldy as a default.
+# The intended UX gates the full output behind advanced options and shows a
+# conventional 32 characters by default.  For the time being the export surfaces
+# only the first MASTER_DISPLAY_CHARS hex characters of the Argon2id output.
+MASTER_DISPLAY_CHARS = 32
 
 # ---------------------------------------------------------------------------
 # Rendering parameters
@@ -139,19 +159,22 @@ CONTRACTION_DIVISOR = 4
 
 BITS_PER_POINT = 32
 
-# Protocol geometry: exactly ONE 32-bit point (one needle) per stage, and
-# each stage is its own fractal (one haystack).  The number of stages is
-# therefore entropy_bits / BITS_PER_POINT.  The first stage is the canonical
-# Burning Ship (o=p=q=0); every later stage's fractal is derived by hashing
-# all preceding points through the memory-hard chain (Argon2 → SHA-256 →
-# (o,p,q)).  So an N-stage secret has 1 canonical fractal and N−1 secret,
-# chain-derived fractals.
+# Protocol geometry (0.3.0): a mandatory, point-less STAGE 0 carries only a
+# short text input, then exactly ONE 32-bit point (one needle) is encoded per
+# later stage, and each point stage is its own fractal (one haystack).  The
+# number of POINT stages is N = entropy_bits / BITS_PER_POINT; the total stage
+# count is N + 1 because stage 0 is always present.  Every point stage's fractal
+# is derived by hashing stage-0 text plus all preceding points through the
+# memory-hard chain (Argon2 → SHA-256 → (o,p,q)).  There is NO canonical
+# fractal: even the first point stage derives from stage-0 text, so all N
+# haystacks are secret and chain-derived.
 #
-# Because n_stages = entropy_bits / 32 = words / 3, every BIP39 size that is a
-# multiple of 32 entropy bits falls out uniformly — one extra stage per extra
-# 32 bits (3 words).  We expose all of them, from 32 bits (3 words, 1 stage) up
-# to a HARD CAP of 256 bits (24 words, 8 stages).  Going beyond 256 is allowed
-# in theory but deliberately NOT offered: one more stage is the same marginal
+# Below, `n_stages` is the count of POINT stages (N) — it does NOT include
+# stage 0.  Because N = entropy_bits / 32 = words / 3, every BIP39 size that is
+# a multiple of 32 entropy bits falls out uniformly — one extra point stage per
+# extra 32 bits (3 words).  We expose all of them, from 32 bits (3 words, N=1)
+# up to a HARD CAP of 256 bits (24 words, N=8).  Going beyond 256 is allowed in
+# theory but deliberately NOT offered: one more stage is the same marginal
 # mental effort for diminishing returns, so the better lever past 24 words is
 # more between-stage Argon2 iterations, not more stages.  (Future: a user with a
 # specific reason could chain multiple setups via an "advanced pepper" field —
@@ -159,8 +182,8 @@ BITS_PER_POINT = 32
 #
 # Tiers: 32/64/96 bits are "sub-standard" (below BIP39's 128-bit floor — weak,
 # offered for completeness); 128..256 are the "standard" BIP39 sizes.
-MAX_ENTROPY_BITS = 256                 # hard cap (24 words, 8 stages)
-MIN_ENTROPY_BITS = BITS_PER_POINT      # 32 bits (3 words, 1 stage)
+MAX_ENTROPY_BITS = 256                 # hard cap (24 words, N=8 point stages)
+MIN_ENTROPY_BITS = BITS_PER_POINT      # 32 bits (3 words, N=1 point stage)
 
 
 def _build_size_presets():
@@ -193,7 +216,11 @@ SIZE_PRESET_ALIASES = {"mini": "6w", "default": "12w", "large": "24w"}
 
 
 def n_stages_for(entropy_bits):
-    """Number of stages (= one point each) for a given entropy-bit count."""
+    """Number of POINT stages (= one point each) for a given entropy-bit count.
+
+    This is N (stages 1..N in the documented numbering); it does not count the
+    mandatory point-less stage 0.
+    """
     return entropy_bits // BITS_PER_POINT
 
 # Encoding area: the BS region where island density supports 32-bit encoding
