@@ -21,6 +21,7 @@ import subprocess
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 from protocol import PROTOCOL_VERSION  # noqa: E402  (current chained-protocol version)
+from burning_ship_engine import get_engine_version  # noqa: E402  (single-fractal algo version)
 CLI_PATH = os.path.join(SCRIPT_DIR, "cli.py")
 VECTORS_DIR = os.path.join(SCRIPT_DIR, "test_vectors")
 
@@ -47,6 +48,9 @@ def run_encode(vector_doc):
         "--profile", inp["argon2_profile"],
         "--iterations", str(inp["argon2_iterations"]),
         "--mode", inp["gw_mode"],
+        # Stage-0 text seeds the chain (protocol 0.3.0); pass it through so the
+        # re-encode reproduces the frozen vector exactly.
+        "--stage0-text", inp.get("stage0_text", ""),
     ]
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
     if result.returncode != 0:
@@ -154,9 +158,13 @@ def test_round_trip(vector_path, verbose=False):
 def test_cross_mode(vectors_dir, verbose=False):
     """Test that the first stage's leaf is identical across mini/default/large.
 
-    Stage 0 is the canonical fractal and its 32-bit point depends only on the
-    first 32 entropy bits, which are identical for the all-zero "abandon"
-    mnemonics across presets — so the first leaf must match.
+    Under protocol 0.3.0 the first point stage's fractal derives from stage-0
+    text plus the (empty) prior-point prefix.  These vectors use an empty
+    stage-0 text, so the first stage's params are identical across presets, and
+    its 32-bit point depends only on the first 32 entropy bits — which are
+    identical for the all-zero "abandon" mnemonics across presets.  Hence the
+    first leaf must match.  (There is no canonical fractal anymore; the match
+    comes from a shared stage-0 text + shared first chunk, not from o=p=q=0.)
     """
     patterns = [
         ("mini_abandon_iter0.json", "default_abandon_iter0.json", "large_abandon_iter0.json"),
@@ -246,7 +254,8 @@ def test_meta_leaf_membership(vectors_dir, verbose=False):
         print("  SKIP  meta-leaf-membership: no iter0 vectors")
         return True
     doc = json.load(open(os.path.join(vectors_dir, cands[0])))
-    leaf = doc["stages"][0]["leaf"]
+    stage0 = doc["stages"][0]
+    leaf = stage0["leaf"]
     rmn, rmx = _parse_hex_i64(leaf["re_min"]), _parse_hex_i64(leaf["re_max"])
     imn, imx = _parse_hex_i64(leaf["im_min"]), _parse_hex_i64(leaf["im_max"])
     if rmx <= rmn or imx <= imn:
@@ -258,13 +267,18 @@ def test_meta_leaf_membership(vectors_dir, verbose=False):
     cre, cim = _midpoint_i64(rmn, rmx), _midpoint_i64(imn, imx)
 
     # Ground the boundaries in the real engine: decoding the center must land in
-    # exactly the recorded leaf (stage 0 is canonical, o=p=q=0).
+    # exactly the recorded leaf.  Stage 0 is chain-derived (protocol 0.3.0), so
+    # we decode with the stage's OWN stored (o, p, q), not o=p=q=0.
+    p0 = stage0["params"]
+    o0 = _parse_hex_i64(p0["o"]) if isinstance(p0["o"], str) else p0["o"]
+    pp0 = _parse_hex_i64(p0["p"]) if isinstance(p0["p"], str) else p0["p"]
+    q0 = _parse_hex_i64(p0["q"]) if isinstance(p0["q"], str) else p0["q"]
     try:
         from burning_ship_engine import decode_full
         from constants import ENCODE_AREA, GUI_PARAMS, BITS_PER_POINT
         _b, lr, _valid, _p = decode_full(
             cre, cim, BITS_PER_POINT, area=ENCODE_AREA, params=GUI_PARAMS,
-            o=0, p=0, q=0, path_prefix="O")
+            o=o0, p=pp0, q=q0, path_prefix="O")
         if (lr.re_min, lr.re_max, lr.im_min, lr.im_max) != (rmn, rmx, imn, imx):
             print("  FAIL  meta-leaf-membership: engine leaf != recorded leaf")
             return False
@@ -419,8 +433,9 @@ def main():
             os.path.join(vectors_dir, f) for f in os.listdir(vectors_dir)
             if f.endswith(".json"))
 
+    current_engine = get_engine_version()
     print(f"Testing vectors in: {vectors_dir}")
-    print(f"Current protocol_version: {PROTOCOL_VERSION}")
+    print(f"Current engine version: {current_engine}   protocol_version: {PROTOCOL_VERSION}")
     print()
 
     passed = 0
@@ -428,31 +443,36 @@ def main():
     total = 0
     stale = 0
 
-    # Version guard: a vector generated for a different protocol_version is
-    # STALE.  We skip it (never counting it as a pass) so a stale vector can
-    # never show false-green during pre-1.0 protocol churn.  Comprehensive
-    # vectors are rebuilt at the stable 1.0.0 release (see DESIGN.md / README).
-    def _vector_version(path):
+    # Version guard: a vector is STALE unless BOTH its engine `version` (the
+    # single-fractal encode/decode algorithm) and its `protocol_version` (the
+    # chained orchestration) match the current code.  Either differing means the
+    # frozen output can no longer reproduce, so we skip it (never counting it as
+    # a pass) — a stale vector can never show false-green during pre-1.0 churn.
+    # Comprehensive vectors are rebuilt at the stable 1.0.0 release (see README).
+    def _vector_versions(path):
         try:
             with open(path) as fh:
-                return json.load(fh).get("protocol_version", "<unset>")
+                d = json.load(fh)
+            return d.get("protocol_version", "<unset>"), d.get("version", "<unset>")
         except Exception:
-            return "<unreadable>"
+            return "<unreadable>", "<unreadable>"
 
     fresh_files = []
     stale_files = []
     for vf in vector_files:
-        if _vector_version(vf) == PROTOCOL_VERSION:
+        pv, ev = _vector_versions(vf)
+        if pv == PROTOCOL_VERSION and ev == current_engine:
             fresh_files.append(vf)
         else:
-            stale_files.append(vf)
+            stale_files.append((vf, pv, ev))
 
     if stale_files:
-        print("=== STALE Vectors (skipped — protocol_version mismatch) ===")
-        for vf in stale_files:
+        print("=== STALE Vectors (skipped — version mismatch) ===")
+        for vf, pv, ev in stale_files:
             stale += 1
             print(f"  STALE {os.path.basename(vf)} "
-                  f"(protocol {_vector_version(vf)} != current {PROTOCOL_VERSION})")
+                  f"(engine {ev}/protocol {pv} != current engine {current_engine}/"
+                  f"protocol {PROTOCOL_VERSION})")
         print()
 
     # Frozen vector tests (fresh vectors only)

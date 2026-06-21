@@ -145,6 +145,53 @@ def bits_to_hex(bits):
     return bits_to_bytes(bits).hex()
 
 
+# ---------------------------------------------------------------------------
+# Stage text normalization (protocol 0.3.0)
+# ---------------------------------------------------------------------------
+#
+# Every stage text input — stage-0 text AND every non-0 stage's master-secret
+# export label — is restricted to upper-case ASCII alphanumerics and '-' only
+# ([A-Z0-9-]).  The restriction (DESIGN.md "Strong text restrictions") exists so
+# the same text round-trips identically across devices, keyboards, locales, and
+# clipboards: a stray lower-case letter, accent, or Unicode look-alike would
+# silently fork the chain (or the export) into a different, unrecoverable result.
+
+STAGE_TEXT_ALPHABET = set("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-")
+
+
+def normalize_stage_text(text):
+    """Normalize stage text to the ``[A-Z0-9-]`` set (DESIGN.md §Stage 0).
+
+    Up-cases ASCII letters and drops every character outside ``[A-Z0-9-]``
+    (accents, spaces, punctuation, Unicode look-alikes, control bytes).
+
+    Returns ``(normalized, changed)`` where ``changed`` is True if any character
+    was up-cased or dropped — so callers (e.g. the GUI field) can signal the user
+    that a restriction was applied, and the divergence is never silent.
+    """
+    out = []
+    changed = False
+    for ch in text:
+        up = ch.upper()
+        if up != ch:
+            changed = True
+        if up in STAGE_TEXT_ALPHABET:
+            out.append(up)
+        else:
+            changed = True
+    return "".join(out), changed
+
+
+def stage_text_bytes(text):
+    """ASCII bytes of normalized stage text — the chain/export input form.
+
+    Normalizes first (so callers may pass raw text) and encodes as ASCII; the
+    ``[A-Z0-9-]`` restriction guarantees the encoding is always valid ASCII.
+    """
+    normalized, _changed = normalize_stage_text(text)
+    return normalized.encode("ascii")
+
+
 def compute_checksum_bits(entropy_bits):
     """Compute the BIP39 checksum (len/32 bits) from entropy bits."""
     cs_len = len(entropy_bits) // 32

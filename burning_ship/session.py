@@ -91,9 +91,10 @@ def paste_from_clipboard():
 def save_session(state, path):
     """Save the current encoding session to a JSON file (F6).
 
-    Serialized with the chained, one-point-per-stage layout: per-stage leaf
-    centers, per-stage params (list of dicts; element 0 is null = canonical),
-    the active stage index, and the cumulative path/marker.
+    Serialized with the chained, one-point-per-stage layout: stage-0 text,
+    per-stage leaf centers, per-stage params (list of dicts; every point stage
+    is chain-derived in 0.3.0), the active stage index, and the cumulative
+    path/marker.
     """
     entropy_bits = []
     for chunks in state.stages_encoded_bits_chunks:
@@ -117,6 +118,7 @@ def save_session(state, path):
         "stages_leaf_centers": stages_centers,
         "stages_params": state.stages_params,
         "stage": state.stage,
+        "stage0_text": getattr(state, "stage0_text", ""),
         "hashing": {
             "profile": state.argon2_profile,
             "iterations": int(state.argon2_iterations) if state.argon2_iterations else 0,
@@ -171,11 +173,17 @@ def load_session(state, path):
     state.stage1_path = doc.get("stage1_path", "O")
     state.argon2_marker = doc.get("argon2_marker", "")
 
+    # Stage-0 text seeds the chain (protocol 0.3.0).
+    from encoding import normalize_stage_text
+    state.stage0_text, _changed = normalize_stage_text(doc.get("stage0_text", ""))
+
     # Rebuild all per-stage lists sized to the detected preset, then re-encode
-    # the full chain (N-1 derivations) from the stored entropy bits.
+    # the full chain (N derivations, one per point stage) from the stored
+    # entropy bits + stage-0 text.
     state.reset_stage_data()
     from viewer import populate_stages_from_results  # GUI helper; avoids cycle
-    stages = protocol.encode_entropy(entropy_bits, state.argon2_profile, iters)
+    stages = protocol.encode_entropy(
+        entropy_bits, state.stage0_text, state.argon2_profile, iters)
     populate_stages_from_results(state, stages)
     state.argon2_stage1_bits = list(entropy_bits)
 

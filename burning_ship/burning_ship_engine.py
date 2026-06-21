@@ -222,6 +222,16 @@ _lib.bs_argon2_single.argtypes = [
 ]
 _lib.bs_argon2_single.restype = None
 
+# Master-secret export: one Argon2id pass over the setup transcript (protocol
+# 0.3.0).  Variable-length message in, caller-sized output buffer out.
+_lib.bs_argon2id_master.argtypes = [
+    ctypes.POINTER(ctypes.c_uint8),  # msg_ptr (variable length)
+    ctypes.c_uint32,                  # msg_len
+    ctypes.POINTER(ctypes.c_uint8),  # out_ptr (out_len bytes)
+    ctypes.c_uint32,                  # out_len
+]
+_lib.bs_argon2id_master.restype = None
+
 
 
 # ---------------------------------------------------------------------------
@@ -702,6 +712,31 @@ def argon2_single(input_bytes, profile=PROFILE_BASIC):
     inp = (ctypes.c_uint8 * n)(*input_bytes)
     out = (ctypes.c_uint8 * ARGON2_DIGEST_BYTES)()
     _lib.bs_argon2_single(inp, n, profile, out)
+    return bytes(out)
+
+
+# Master-secret export output length (Argon2id `l`).  The protocol specifies
+# 1024 bytes; excess output is simply ignored by the consumer.
+ARGON2ID_MASTER_OUTPUT_BYTES = 1024
+
+
+def argon2id_master(message, out_len=ARGON2ID_MASTER_OUTPUT_BYTES):
+    """Run the master-secret export: one Argon2id pass over ``message``.
+
+    Argon2id with the fixed master profile (m = 64 MiB, t = 8, p = 2) and the
+    fixed salt ``b"greatwall"`` (DESIGN.md "Master-Secret Export").
+
+    Args:
+        message: the reproducible setup-transcript bytes.
+        out_len: Argon2 output length ``l`` in bytes (default 1024).
+
+    Returns:
+        bytes: ``out_len`` bytes of Argon2id output.
+    """
+    n = len(message)
+    inp = (ctypes.c_uint8 * n)(*message) if n else (ctypes.c_uint8 * 0)()
+    out = (ctypes.c_uint8 * out_len)()
+    _lib.bs_argon2id_master(inp, n, out, out_len)
     return bytes(out)
 
 

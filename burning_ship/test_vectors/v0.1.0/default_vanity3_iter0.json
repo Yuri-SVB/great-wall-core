@@ -1,10 +1,11 @@
 {
   "version": "0.1.0",
-  "protocol_version": "0.2.0",
+  "protocol_version": "0.3.0",
   "input": {
     "entropy_hex": "df936139cbdefbc1acb91913d85e4f61",
     "entropy_bits": 128,
     "bip39_mnemonic": "test only example nut use this real case because seed need secret",
+    "stage0_text": "",
     "argon2_profile": "b",
     "argon2_iterations": 0,
     "gw_mode": "d",
@@ -14,34 +15,36 @@
   "stages": [
     {
       "index": 0,
-      "canonical": true,
       "params": {
-        "o": "0x0000000000000000",
-        "p": "0x0000000000000000",
-        "q": "0x0000000000000000",
-        "o_re": 0.0,
-        "o_im": 0.0,
-        "p_re": 0.0,
-        "p_im": 0.0,
-        "q_re": 0.0,
-        "q_im": 0.0
+        "o": "0x66687AADF862BD77",
+        "p": "0x6C8FC18B8E9F8E20",
+        "q": "0x089714856EE233B3",
+        "o_re": -0.23314389761071652,
+        "o_im": 0.17711672780569643,
+        "p_re": -0.12717051384970546,
+        "p_im": 0.22730244108242914,
+        "q_re": 0.05024364389828406,
+        "q_im": 0.039345655823126435
       },
-      "argon2": null,
+      "argon2": {
+        "input_hex": "",
+        "iterations": 0,
+        "final_digest": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
       "leaf": {
-        "re_min": "0x0A7850405A4B10E4",
-        "re_max": "0x0A785051128CD686",
-        "im_min": "0xE9B4399BD8A55B5E",
-        "im_max": "0xE9B439AC32E45296",
-        "re_min_f64": 0.654373408677831,
-        "re_max_f64": 0.6543734709637669,
-        "im_min_f64": -1.3934997474913555,
-        "im_max_f64": -1.393499686573459,
-        "path": "OrdLrDDdrDluRulrdldrUULldLURDruld"
+        "re_min": "0x0B38DF5AF05215A2",
+        "re_max": "0x0B38E13515A015E6",
+        "im_min": "0xEDF60AA4B8AB73AA",
+        "im_max": "0xEDF60BA7E87EEE72",
+        "re_min_f64": 0.701384883145811,
+        "re_max_f64": 0.7013866494762673,
+        "im_min_f64": -1.1274312558719286,
+        "im_max_f64": -1.1274302903257802,
+        "path": "OrdlDrDRDruldluRDlDRuLULdLUrdrULd"
       }
     },
     {
       "index": 1,
-      "canonical": false,
       "params": {
         "o": "0x00FE066F1491C9EE",
         "p": "0xE26970110840C81A",
@@ -72,7 +75,6 @@
     },
     {
       "index": 2,
-      "canonical": false,
       "params": {
         "o": "0x29410A2EB4089B3B",
         "p": "0x2DA3A230F8DFB531",
@@ -103,7 +105,6 @@
     },
     {
       "index": 3,
-      "canonical": false,
       "params": {
         "o": "0x2CA4C5D72DDD45E3",
         "p": "0x7C52C280730F4A14",
