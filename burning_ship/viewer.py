@@ -142,10 +142,24 @@ def encode_full_mnemonic(state):
 
     Drives the memory-hard chain (N derivations, one per point stage)
     synchronously, populating every per-stage list and the per-stage params.
-    Stage-0 text (``state.stage0_text``) seeds the chain.  Raises ValueError on
-    a bad mnemonic.  Returns the entropy bits.
+    Stage-0 text (``state.stage0_text``) seeds the chain.
+
+    The selected size preset (W) is the source of truth for how many stages a
+    setup has: the entered phrase MUST match it.  A phrase whose entropy length
+    differs from the preset is rejected (``ValueError``) rather than silently
+    encoded at the wrong stage count — e.g. a 12-word phrase in 24-word mode used
+    to silently yield 4 stages instead of 8.  (Mirrors the CLI's cmd_encode
+    validation.)  Also raises ``ValueError`` on a malformed mnemonic.  Returns
+    the entropy bits.
     """
     entropy_bits = entropy_from_mnemonic(state.input_text)
+    expected_bits = state.entropy_bits
+    if len(entropy_bits) != expected_bits:
+        got_words = len(state.input_text.split())
+        raise ValueError(
+            f"{state.bip39_words}-word mode needs {expected_bits} entropy bits "
+            f"({state.bip39_words} words); got {got_words} words "
+            f"({len(entropy_bits)} bits). Fix the phrase or change size (W).")
     try:
         iters = int(state.argon2_iterations)
         if iters < 0:
