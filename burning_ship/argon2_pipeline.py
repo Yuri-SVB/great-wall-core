@@ -15,7 +15,7 @@ from burning_ship_engine import (
 )
 from bip39 import bits_to_mnemonic
 from constants import (
-    ARGON2_INPUT_BYTES,
+    ARGON2_INPUT_BYTES, BITS_PER_POINT,
     P_MAGNITUDE_BITS, P_SIGN_BIT_RE, P_SIGN_BIT_IM,
     P_MAGNITUDE_MIN_EXP, P_BASELINE_EXP,
     Q_MAGNITUDE_BITS, Q_SIGN_BIT_RE, Q_SIGN_BIT_IM, Q_MAGNITUDE_MIN_EXP,
@@ -429,6 +429,81 @@ def run_random_encode(state):
             state.status_color = CLR_WARNING
         except Exception as e:
             state.status_msg = f"F2 error: {e}"
+            state.status_color = CLR_ERROR
+        state.argon2_running = False
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+
+
+# ---------------------------------------------------------------------------
+# Full-mnemonic encode (background thread)
+# ---------------------------------------------------------------------------
+
+def run_full_encode(state, entropy_bits, iters):
+    """Encode a known mnemonic's entropy through the full chain, off-thread.
+
+    The Enter key / Encode button used to run :func:`protocol.encode_entropy`
+    synchronously on the GUI event-loop thread, which froze the whole window for
+    the entire memory-hard chain (one Argon2 run per point stage — e.g. ~30s per
+    stage on the Basic profile, so minutes for a 256-bit setup).  This mirrors
+    :func:`run_random_encode`: it runs the chain on a daemon thread, reports
+    per-stage Argon2 progress to the panel's progress bar, and honours the Stop
+    button (``argon2_stop_requested``) at each iteration boundary.
+
+    The caller is responsible for validating ``entropy_bits`` against the size
+    preset first (see ``viewer.encode_full_mnemonic``); this just runs it.
+    """
+    profile = state.argon2_profile
+    n = max(1, len(entropy_bits) // BITS_PER_POINT)
+    state.argon2_running = True
+    state.argon2_stop_requested = False
+    state.argon2_digest = ""
+    state.argon2_progress = 0
+    state.argon2_progress_total = max(iters, 1) * n
+    prof_label = {PROFILE_BASIC: "Basic", PROFILE_ADVANCED: "Advanced",
+                  PROFILE_GREAT_WALL: "Great Wall"}.get(profile, "Basic")
+    label = "identity" if iters == 0 else f"x{iters}, {prof_label}"
+    state.status_msg = (f"Encoding {n} stages ({label}) — Argon2 chain running…")
+    state.status_color = CLR_PENDING
+
+    def _worker():
+        try:
+            import protocol  # deferred to avoid import cycle
+            from viewer import populate_stages_from_results  # GUI helper
+
+            per_stage = max(iters, 1)
+
+            def _progress(stage_index, done):
+                # stage_index is the 0-based point stage (0..n-1).
+                state.argon2_progress = stage_index * per_stage + done
+
+            def _stop():
+                _check_argon2_stop(state)
+
+            stages = protocol.encode_entropy(
+                entropy_bits, getattr(state, "stage0_text", ""), profile, iters,
+                progress_cb=_progress, stop_check=_stop)
+
+            populate_stages_from_results(state, stages)
+            # All encoded bits are the cumulative prior-point prefix (a later
+            # manual Argon2 step would be a no-op here).
+            state.argon2_stage1_bits = list(entropy_bits)
+            state.argon2_marker = argon2_path_marker(profile, iters)
+            state.stage = 0
+            state.selected_point_idx = None
+            state.selected_decoded_idx = None
+            cache_clear_stage2()
+            state.needs_redraw = True
+            state.status_msg = (f"Encoded {n} stages "
+                                f"({len(entropy_bits)} bits) [{state.argon2_marker}]")
+            state.status_color = CLR_SUCCESS
+        except _Argon2Stopped:
+            state.status_msg = (f"Encode stopped at "
+                                f"{state.argon2_progress}/{state.argon2_progress_total}")
+            state.status_color = CLR_WARNING
+        except Exception as e:
+            state.status_msg = f"Encode error: {e}"
             state.status_color = CLR_ERROR
         state.argon2_running = False
 

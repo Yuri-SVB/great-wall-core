@@ -84,7 +84,7 @@ from encoding import (
 from argon2_pipeline import (
     run_argon2_iterative,
     decode_p_display, decode_q_display, decode_o_display,
-    run_random_encode,
+    run_random_encode, run_full_encode,
 )
 from session import (
     copy_to_clipboard, paste_from_clipboard,
@@ -138,19 +138,22 @@ def populate_stages_from_results(state, stages):
 
 
 def encode_full_mnemonic(state):
-    """Encode the full mnemonic into all stages via protocol.encode_entropy.
+    """Validate the entered mnemonic, then encode it off the UI thread.
 
-    Drives the memory-hard chain (N derivations, one per point stage)
-    synchronously, populating every per-stage list and the per-stage params.
-    Stage-0 text (``state.stage0_text``) seeds the chain.
+    Validation (synchronous, raises ``ValueError`` so the caller can show it):
 
-    The selected size preset (W) is the source of truth for how many stages a
-    setup has: the entered phrase MUST match it.  A phrase whose entropy length
-    differs from the preset is rejected (``ValueError``) rather than silently
-    encoded at the wrong stage count — e.g. a 12-word phrase in 24-word mode used
-    to silently yield 4 stages instead of 8.  (Mirrors the CLI's cmd_encode
-    validation.)  Also raises ``ValueError`` on a malformed mnemonic.  Returns
-    the entropy bits.
+    - The selected size preset (W) is the source of truth for how many stages a
+      setup has: the entered phrase MUST match it.  A phrase whose entropy length
+      differs from the preset is rejected rather than silently encoded at the
+      wrong stage count — e.g. a 12-word phrase in 24-word mode used to silently
+      yield 4 stages instead of 8.  (Mirrors the CLI's cmd_encode validation.)
+    - A malformed mnemonic (bad word/length/checksum) also raises ``ValueError``.
+
+    The actual memory-hard chain (one Argon2 run per point stage) then runs on a
+    **background thread** (:func:`argon2_pipeline.run_full_encode`) so the window
+    stays responsive — with the panel's Argon2 progress bar and a working Stop
+    button — instead of freezing the event loop for the whole derivation.  The
+    worker sets the final status; this returns immediately after dispatch.
     """
     entropy_bits = entropy_from_mnemonic(state.input_text)
     expected_bits = state.entropy_bits
@@ -160,25 +163,15 @@ def encode_full_mnemonic(state):
             f"{state.bip39_words}-word mode needs {expected_bits} entropy bits "
             f"({state.bip39_words} words); got {got_words} words "
             f"({len(entropy_bits)} bits). Fix the phrase or change size (W).")
+    if state.argon2_running:
+        raise ValueError("Busy — a derivation is already running (Stop it first).")
     try:
         iters = int(state.argon2_iterations)
         if iters < 0:
             raise ValueError
     except ValueError:
         iters = 0
-    stages = protocol.encode_entropy(
-        entropy_bits, state.stage0_text, state.argon2_profile, iters)
-    populate_stages_from_results(state, stages)
-    # The cumulative prior-point bits feeding the NEXT derivation are all
-    # encoded bits (so a subsequent manual Argon2 step would be a no-op here).
-    state.argon2_stage1_bits = list(entropy_bits)
-    state.argon2_marker = argon2_path_marker(state.argon2_profile, iters)
-    state.stage = 0
-    state.selected_point_idx = None
-    state.selected_decoded_idx = None
-    state.argon2_digest = ""
-    cache_clear_stage2()
-    state.needs_redraw = True
+    run_full_encode(state, entropy_bits, iters)
     return entropy_bits
 
 
@@ -2357,18 +2350,11 @@ def main():
                 if my >= state.vp_h:
                     if hasattr(state, '_encode_btn_rect') and state._encode_btn_rect.collidepoint(mx, my):
                         try:
-                            # Encode the full mnemonic into ALL stages via the
-                            # memory-hard chain (synchronous; may be slow for
-                            # iters>0, matching the protocol).
+                            # Validate + dispatch the memory-hard chain to a
+                            # background thread; the worker reports progress and
+                            # sets the final status (ValueError here is a
+                            # validation failure, shown immediately).
                             encode_full_mnemonic(state)
-                            n = state.n_stages
-                            if state.debug_mode:
-                                state.status_msg = (
-                                    f"Encoded {n} stages ({state.entropy_bits} bits) "
-                                    f"[{state.argon2_marker}]  T to walk stages")
-                            else:
-                                state.status_msg = f"Encoded {n} stages ({state.entropy_bits} bits)"
-                            state.status_color = CLR_SUCCESS
                         except ValueError as e:
                             state.status_msg = f"Error: {e}"
                             state.status_color = CLR_ERROR

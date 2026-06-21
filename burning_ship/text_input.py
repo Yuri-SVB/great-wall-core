@@ -81,14 +81,13 @@ def handle_text_input(state, event):
     cur = state.input_cursor
 
     if event.key == pygame.K_RETURN:
-        # Encode the full mnemonic into ALL stages via the memory-hard chain.
+        # Validate + dispatch the memory-hard chain to a background thread (it
+        # reports progress and sets the final status itself).  A ValueError here
+        # is a synchronous validation failure (size mismatch / bad mnemonic).
         # Imported lazily to avoid a circular import (viewer imports this module).
         from viewer import encode_full_mnemonic
         try:
             encode_full_mnemonic(state)
-            state.status_msg = (f"Encoded {state.n_stages} stages "
-                                f"({state.entropy_bits} bits)")
-            state.status_color = CLR_SUCCESS
         except ValueError as e:
             state.status_msg = f"Error: {e}"
             state.status_color = CLR_ERROR
