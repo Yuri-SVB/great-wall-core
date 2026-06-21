@@ -168,6 +168,50 @@ def encode_full_mnemonic(state):
     return entropy_bits
 
 
+def enter_select_mode(state):
+    """Begin the chained per-stage decode/selection flow (protocol 0.3.0).
+
+    There is **no canonical fractal**: the first point stage's fractal is derived
+    from stage-0 text.  So entering select mode does NOT present a clickable
+    canonical surface — instead it kicks off the memory-hard derivation of
+    stage 0's fractal from the stage-0 text (if it isn't already derived), and
+    the user only clicks once a real, chain-derived fractal is ready.  Stage 0
+    in the documented protocol is the text-only stage; the first *point* is
+    placed on the derived "Stage 1" fractal.
+    """
+    state.stage = 0
+    cache_clear_stage2()
+    state.select_active_idx = 0
+    state.selected_points = [None] * state.points_per_stage
+    if state.stages_params[0] is None:
+        # No prior points yet — the chain seed is the stage-0 text alone.  Run
+        # the derivation so the first fractal the user sees/clicks is genuine,
+        # never the old o=p=q=0 canonical surface.
+        state.argon2_stage1_bits = []
+        try:
+            iters = int(state.argon2_iterations)
+            if iters < 0:
+                raise ValueError
+        except ValueError:
+            iters = 0
+        state.argon2_running = True
+        state.argon2_digest = ""
+        state.argon2_progress = 0
+        state.argon2_progress_total = max(iters, 1)
+        empty_note = " (stage-0 text is empty — type a label first!)" if not state.stage0_text else ""
+        state.status_msg = (f"Deriving stage 1/{state.n_stages} from stage-0 "
+                            f"text…{empty_note}")
+        state.status_color = CLR_PENDING
+        state.needs_redraw = True
+        run_argon2_iterative(state, iters)
+    else:
+        state.status_msg = (
+            f"Click slot 1/{state.points_per_stage} (stage 1/{state.n_stages}). "
+            f"N=cycle slot, click=set/overwrite.")
+        state.status_color = CLR_WARNING
+        state.needs_redraw = True
+
+
 class ViewerState:
     def __init__(self, width=800, height=600):
         self.win_w = width
@@ -2053,26 +2097,17 @@ def main():
                     elif event.key == pygame.K_s:
                         state.select_mode = not state.select_mode
                         if state.select_mode:
-                            # Start decoding from the first point stage (chain-derived).
-                            state.stage = 0
-                            cache_clear_stage2()
-                            state.select_active_idx = 0
-                            state.selected_points = [None] * state.points_per_stage
-                            state.status_msg = (
-                                f"Click slot 1/{state.points_per_stage} "
-                                f"(stage 1/{state.n_stages}). "
-                                f"N=cycle slot, click=set/overwrite.")
-                            state.status_color = CLR_WARNING
-                            state.needs_redraw = True
+                            enter_select_mode(state)
                         else:
                             state.status_msg = "Select mode off"
                             state.status_color = CLR_NEUTRAL
                     elif event.key == pygame.K_t:
-                        # Advance to the next AVAILABLE stage, wrapping to 0.
-                        # Stage 0 is always available; stage k>0 is available
-                        # iff its fractal params have been derived.
+                        # Advance to the next AVAILABLE stage, wrapping around.
+                        # A stage is available iff its fractal params have been
+                        # derived (protocol 0.3.0: every point stage, including
+                        # the first, is chain-derived — none is canonical).
                         def _stage_available(k):
-                            return k == 0 or state.stages_params[k] is not None
+                            return state.stages_params[k] is not None
                         n = state.n_stages
                         nxt = None
                         for off in range(1, n + 1):
@@ -2128,6 +2163,17 @@ def main():
                             state.status_msg = "Area visualization ON"
                         state.status_color = CLR_NEUTRAL
                     elif event.key == pygame.K_m:
+                        if (not state.manual_bits_mode
+                                and state.stages_params[state.stage] is None):
+                            # Protocol 0.3.0: the active stage's fractal must be
+                            # chain-derived from stage-0 text before manual bit
+                            # entry — there is no canonical surface to bisect.
+                            state.status_msg = (
+                                f"Stage {state.stage + 1}/{state.n_stages} not "
+                                f"derived — press S (select) / H (Hash) to derive "
+                                f"its fractal from stage-0 text first.")
+                            state.status_color = CLR_WARNING
+                            continue
                         state.manual_bits_mode = not state.manual_bits_mode
                         if state.manual_bits_mode:
                             state.manual_bits = []
@@ -2338,7 +2384,10 @@ def main():
                                     f"iteration ({state.argon2_progress}/"
                                     f"{state.argon2_progress_total})...")
                                 state.status_color = CLR_PENDING
-                        elif state.argon2_stage1_bits:
+                        elif state.argon2_stage1_bits is not None:
+                            # `is not None` (not truthiness): an EMPTY prior-point
+                            # list is valid — it means stage 0, whose fractal
+                            # derives from the stage-0 text alone (protocol 0.3.0).
                             try:
                                 iters = int(state.argon2_iterations)
                                 if iters < 0:
@@ -2357,7 +2406,9 @@ def main():
                             state.status_color = CLR_PENDING
                             run_argon2_iterative(state, iters)
                         else:
-                            state.status_msg = "Encode first to get stage-1 bits"
+                            state.status_msg = ("Press S (select) or encode a "
+                                                "mnemonic first — stage 0 derives "
+                                                "from the stage-0 text.")
                             state.status_color = CLR_WARNING
                     elif hasattr(state, '_argon2_iter_rect') and state._argon2_iter_rect.collidepoint(mx, my):
                         state.argon2_iter_focused = True
@@ -2390,17 +2441,7 @@ def main():
                     elif hasattr(state, '_select_btn_rect') and state._select_btn_rect.collidepoint(mx, my):
                         state.select_mode = not state.select_mode
                         if state.select_mode:
-                            # Start decoding from the first point stage (chain-derived).
-                            state.stage = 0
-                            cache_clear_stage2()
-                            state.select_active_idx = 0
-                            state.selected_points = [None] * state.points_per_stage
-                            state.status_msg = (
-                                f"Click slot 1/{state.points_per_stage} "
-                                f"(stage 1/{state.n_stages}). "
-                                f"N=cycle slot, click=set/overwrite.")
-                            state.status_color = CLR_WARNING
-                            state.needs_redraw = True
+                            enter_select_mode(state)
                         else:
                             state.status_msg = "Select mode off"
                             state.status_color = CLR_NEUTRAL
@@ -2687,6 +2728,17 @@ def main():
                                 f"Deriving stage {state.stage + 2}/{state.n_stages}… "
                                 f"please wait.")
                             state.status_color = CLR_PENDING
+                            continue
+                        if state.stages_params[state.stage] is None:
+                            # Protocol 0.3.0: no canonical fractal — this stage's
+                            # surface must be derived from stage-0 text (+ prior
+                            # points) before a point can be placed.  Never let a
+                            # click land on the o=p=q=0 base fallback.
+                            state.status_msg = (
+                                f"Stage {state.stage + 1}/{state.n_stages} not derived "
+                                f"yet — press H (Hash) to derive its fractal from "
+                                f"stage-0 text first.")
+                            state.status_color = CLR_WARNING
                             continue
                         # Defensive resync: if anything (a stale code path, a
                         # session load, an unusual key sequence) left the slot
