@@ -29,4 +29,5 @@ pub mod bisect;
 pub mod render_cache;
 pub mod argon2_hash;
 pub mod text;
+pub mod protocol;
 pub mod ffi;

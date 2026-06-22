@@ -32,7 +32,7 @@ pub extern "C" fn bs_engine_version(out_buf: *mut u8, buf_len: u32) -> u32 {
 const PIXEL_ESCAPE_MOD: u32 = 255;
 
 /// Default maximum discovery attempts (for FFI callers that don't expose this param).
-const DEFAULT_MAX_ATTEMPTS: u64 = 500_000;
+pub(crate) const DEFAULT_MAX_ATTEMPTS: u64 = 500_000;
 
 /// Compute escape count for a single point.
 /// Returns the iteration count, or -1 if the point does not escape.
@@ -879,5 +879,80 @@ pub extern "C" fn bs_chain_input(
         out[..n].copy_from_slice(&data[..n]);
     }
     data.len() as u32
+}
+
+/// Fill the canonical encode/decode discovery parameters — the single source of
+/// truth callers must use instead of declaring their own. The engine dictates
+/// the protocol; a stale hand-mirrored copy of these (e.g. `max_iter = 64`) is
+/// what stalled deep-zoom encodes. Pass the same values straight back into
+/// `bs_encode` / `bs_decode_full`. Any out pointer may be null to skip it.
+#[no_mangle]
+pub extern "C" fn bs_encode_params(
+    out_max_iter: *mut u32,
+    out_target_good: *mut u32,
+    out_max_flood_points: *mut u64,
+    out_min_grid_cells: *mut u64,
+    out_p_max_shift: *mut u32,
+    out_exclusion_threshold_num: *mut u32,
+    out_rng_seed: *mut u64,
+) {
+    use crate::protocol;
+    unsafe {
+        if !out_max_iter.is_null() {
+            *out_max_iter = protocol::ENCODE_MAX_ITER;
+        }
+        if !out_target_good.is_null() {
+            *out_target_good = protocol::ENCODE_TARGET_GOOD;
+        }
+        if !out_max_flood_points.is_null() {
+            *out_max_flood_points = protocol::ENCODE_MAX_FLOOD_POINTS;
+        }
+        if !out_min_grid_cells.is_null() {
+            *out_min_grid_cells = protocol::ENCODE_MIN_GRID_CELLS;
+        }
+        if !out_p_max_shift.is_null() {
+            *out_p_max_shift = protocol::ENCODE_P_MAX_SHIFT;
+        }
+        if !out_exclusion_threshold_num.is_null() {
+            *out_exclusion_threshold_num = protocol::ENCODE_EXCLUSION_THRESHOLD_NUM;
+        }
+        if !out_rng_seed.is_null() {
+            *out_rng_seed = protocol::ENCODE_RNG_SEED;
+        }
+    }
+}
+
+/// Fill the canonical encode area as raw `Fixed` (I4F60 `i64`) bounds — the
+/// region the protocol encodes into (`constants.py` `ENCODE_AREA`). Companion
+/// to [`bs_encode_params`]; callers pass these straight into the encode/decode
+/// area arguments rather than hard-coding the rectangle.
+#[no_mangle]
+pub extern "C" fn bs_encode_area(
+    out_re_min: *mut Fixed,
+    out_re_max: *mut Fixed,
+    out_im_min: *mut Fixed,
+    out_im_max: *mut Fixed,
+) {
+    let area = crate::protocol::encode_area();
+    unsafe {
+        if !out_re_min.is_null() {
+            *out_re_min = area.re_min;
+        }
+        if !out_re_max.is_null() {
+            *out_re_max = area.re_max;
+        }
+        if !out_im_min.is_null() {
+            *out_im_min = area.im_min;
+        }
+        if !out_im_max.is_null() {
+            *out_im_max = area.im_max;
+        }
+    }
+}
+
+/// Bits encoded per fractal point/stage (`constants.py` `BITS_PER_POINT`).
+#[no_mangle]
+pub extern "C" fn bs_bits_per_point() -> u32 {
+    crate::protocol::BITS_PER_POINT
 }
 
