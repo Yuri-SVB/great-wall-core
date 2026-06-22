@@ -814,3 +814,70 @@ pub extern "C" fn bs_argon2_single(
     }
 }
 
+/// Canonicalize a stage-0 salt/pepper string to the protocol's `[A-Z0-9-]`
+/// set (up-case ASCII letters, drop everything else). This is the single
+/// source of truth for the rule (DESIGN.md "Strong text restrictions"); the
+/// wallet calls it rather than reimplementing the filter, so the same text
+/// yields byte-identical seeds across the engine and the GUI.
+///
+/// Query-then-fill: pass `out_ptr = null` / `out_cap = 0` to learn the
+/// canonical length, then call again with a buffer of that size. Writes up to
+/// `out_cap` ASCII bytes (no NUL terminator) and always returns the full
+/// canonical length in bytes.
+#[no_mangle]
+pub extern "C" fn bs_salt_pepper_canonicalize(
+    in_ptr: *const u8,
+    in_len: u32,
+    out_ptr: *mut u8,
+    out_cap: u32,
+) -> u32 {
+    let input: &[u8] = if in_ptr.is_null() || in_len == 0 {
+        &[]
+    } else {
+        unsafe { slice::from_raw_parts(in_ptr, in_len as usize) }
+    };
+    let canon = crate::text::canonicalize_stage_text(input);
+    if !out_ptr.is_null() && out_cap > 0 {
+        let n = canon.len().min(out_cap as usize);
+        let out = unsafe { slice::from_raw_parts_mut(out_ptr, out_cap as usize) };
+        out[..n].copy_from_slice(&canon[..n]);
+    }
+    canon.len() as u32
+}
+
+/// Build one chain link's Argon2 input: the canonical stage-0 text bytes
+/// followed by `bits_to_bytes(prior_bits)` (the protocol byte layout from
+/// `argon2_pipeline.derive_stage_params`). `bits_ptr` points at `n_bits`
+/// 0/1 bytes — the concatenated bits of every preceding point.
+///
+/// Query-then-fill like [`bs_salt_pepper_canonicalize`]: pass
+/// `out_ptr = null` / `out_cap = 0` to learn the length, then call again with
+/// a buffer of that size. Always returns the full input length in bytes.
+#[no_mangle]
+pub extern "C" fn bs_chain_input(
+    text_ptr: *const u8,
+    text_len: u32,
+    bits_ptr: *const u8,
+    n_bits: u32,
+    out_ptr: *mut u8,
+    out_cap: u32,
+) -> u32 {
+    let text: &[u8] = if text_ptr.is_null() || text_len == 0 {
+        &[]
+    } else {
+        unsafe { slice::from_raw_parts(text_ptr, text_len as usize) }
+    };
+    let bits: &[u8] = if bits_ptr.is_null() || n_bits == 0 {
+        &[]
+    } else {
+        unsafe { slice::from_raw_parts(bits_ptr, n_bits as usize) }
+    };
+    let data = crate::text::chain_input(text, bits);
+    if !out_ptr.is_null() && out_cap > 0 {
+        let n = data.len().min(out_cap as usize);
+        let out = unsafe { slice::from_raw_parts_mut(out_ptr, out_cap as usize) };
+        out[..n].copy_from_slice(&data[..n]);
+    }
+    data.len() as u32
+}
+
