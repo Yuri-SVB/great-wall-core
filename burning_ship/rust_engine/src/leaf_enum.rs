@@ -21,10 +21,10 @@
 /// Both dead slivers and processed leaf rectangles share the same exclusion
 /// list, so every later sample landing in either is skipped cheaply.
 
-use crate::bisect::{decode_locate, Located};
-use crate::discovery::DiscoveryParams;
+use crate::bisect::{expand_node, Located, NodeExpansion};
+use crate::discovery::{DiscoveryParams, InheritedSeed};
 use crate::fixed::{Fixed, Rect};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// A distinct leaf area found within the view.
 #[derive(Clone, Debug)]
@@ -43,12 +43,111 @@ pub enum LeafEnumOutcome {
     /// More than `max_leaves` distinct leaf areas are present; the caller
     /// should ask the user to zoom in.  Carries the cap that was exceeded.
     TooMany { max: usize },
-    /// The decode budget (`max_decodes`) was hit before the scan finished.
-    /// This is the zoom-out guard: when little is excluded, the scan would
-    /// otherwise decode a huge grid at hundreds of ms per point.  The view is
-    /// too dense/dead to enumerate here — the caller should ask the user to
-    /// zoom in.  Carries the number of decodes performed.
-    BudgetExhausted { decodes: usize },
+    /// The discovery budget (`max_decodes`) was hit before the scan finished.
+    /// This is the zoom-out guard: the dominant cost is island *discovery* (one
+    /// per distinct bisection node, ~hundreds of ms each), and at zoom-out the
+    /// visited tree is large.  The view is too dense/dead to enumerate here —
+    /// the caller should ask the user to zoom in.  Carries the number of node
+    /// discoveries performed.
+    BudgetExhausted { discoveries: usize },
+}
+
+/// Memoized bisection tree: each node (keyed by its path) is expanded — its
+/// island discovery, split, and both children — at most once.  Points sharing a
+/// path prefix therefore reuse the upper-level discoveries (the expensive ones)
+/// instead of recomputing them from the root every time.
+struct NodeCache {
+    nodes: Vec<NodeExpansion>,
+    index: HashMap<String, usize>,
+    /// Total node discoveries performed (the cost the budget bounds).
+    discoveries: usize,
+}
+
+impl NodeCache {
+    fn new() -> Self {
+        NodeCache { nodes: Vec::new(), index: HashMap::new(), discoveries: 0 }
+    }
+
+    /// Index of the node for `path`, computing (and counting) it on a miss.
+    #[allow(clippy::too_many_arguments)]
+    fn get_or_compute(
+        &mut self,
+        path: &str,
+        area: Rect,
+        seeds: &[InheritedSeed],
+        params: &DiscoveryParams,
+        rng_seed: u64,
+        o: u64,
+        p: u64,
+        q: u64,
+    ) -> usize {
+        if let Some(&i) = self.index.get(path) {
+            return i;
+        }
+        let node = expand_node(area, params, rng_seed, o, p, q, path, seeds);
+        self.discoveries += 1;
+        let i = self.nodes.len();
+        self.nodes.push(node);
+        self.index.insert(path.to_string(), i);
+        i
+    }
+
+    /// Locate a point via the memoized tree — the cached equivalent of
+    /// `bisect::decode_locate` (Leaf when it reaches a valid leaf, Dead when it
+    /// falls into a contracted-away sliver).
+    #[allow(clippy::too_many_arguments)]
+    fn locate(
+        &mut self,
+        re: Fixed,
+        im: Fixed,
+        num_bits: usize,
+        initial_area: Rect,
+        params: &DiscoveryParams,
+        rng_seed: u64,
+        o: u64,
+        p: u64,
+        q: u64,
+        path_prefix: &str,
+    ) -> Located {
+        let mut path = path_prefix.to_string();
+        let mut area = initial_area;
+        let empty: Vec<InheritedSeed> = Vec::new();
+        let mut idx = self.get_or_compute(&path, area, &empty, params, rng_seed, o, p, q);
+
+        for _ in 0..num_bits {
+            // Read the node, pick the child the point lies in, and gather what's
+            // needed to descend — all before mutating the cache below.
+            let (child_path, child_area, seeds_if_uncached) = {
+                let node = &self.nodes[idx];
+                let side_hi = if node.split_vertical {
+                    re.0 >= node.split_coord.0
+                } else {
+                    im.0 >= node.split_coord.0
+                };
+                let child = if side_hi { &node.hi } else { &node.lo };
+                if !child.area.contains(re, im) {
+                    // Outside the contracted child → in its dead sliver.
+                    return Located::Dead { rect: child.dead_sliver };
+                }
+                let child_path = format!("{path}{}", child.dir);
+                let uncached = !self.index.contains_key(&child_path);
+                (
+                    child_path,
+                    child.area,
+                    if uncached { Some(child.inherited_seeds.clone()) } else { None },
+                )
+            };
+
+            path = child_path;
+            area = child_area;
+            idx = match seeds_if_uncached {
+                Some(seeds) => self.get_or_compute(&path, area, &seeds, params, rng_seed, o, p, q),
+                None => self.index[&path],
+            };
+        }
+
+        Located::Leaf { rect: area, path }
+    }
 }
 
 /// Enumerate the distinct canonical leaf areas visible in a view.
@@ -60,11 +159,12 @@ pub enum LeafEnumOutcome {
 /// (`initial_area`, `params`, `rng_seed`, `num_bits`, `o`, `p`, `q`,
 /// `path_prefix`) are exactly those used elsewhere for decoding.
 ///
-/// `max_decodes` bounds the total number of (non-excluded) decodes — the
-/// zoom-out guard.  A decode is ~hundreds of ms, so at zoom-out, where almost
-/// nothing is excluded, an unbounded scan would decode the whole grid and hang.
-/// On hitting the budget the scan aborts with [`LeafEnumOutcome::BudgetExhausted`].
-/// `0` disables the budget (unbounded).
+/// `max_decodes` bounds the total number of island *discoveries* (one per
+/// distinct bisection node) — the zoom-out guard and the real cost unit. The
+/// per-point decodes are memoized by path in a [`NodeCache`], so points sharing a
+/// path prefix reuse the (expensive, upper-level) discoveries instead of
+/// recomputing them.  On hitting the budget the scan aborts with
+/// [`LeafEnumOutcome::BudgetExhausted`]; `0` disables the budget (unbounded).
 #[allow(clippy::too_many_arguments)]
 pub fn enumerate_leaf_areas(
     origin_re: f64,
@@ -90,8 +190,9 @@ pub fn enumerate_leaf_areas(
     let mut exclusions: Vec<Rect> = Vec::new();
     let mut leaves: Vec<LeafArea> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
-    // Count of (non-excluded) decodes performed — bounded by `max_decodes`.
-    let mut decodes: usize = 0;
+    // Memoize bisection nodes across all samples so shared path prefixes (the
+    // expensive upper levels) are discovered once, not per point.
+    let mut cache = NodeCache::new();
 
     for row in (0..height_px).step_by(scan) {
         let im = Fixed::from_f64(origin_im + row as f64 * step);
@@ -103,15 +204,15 @@ pub fn enumerate_leaf_areas(
                 continue;
             }
 
-            // Zoom-out guard: abort once the decode budget is hit, rather than
-            // decode the whole (barely-excluded) grid at hundreds of ms each.
-            if max_decodes != 0 && decodes >= max_decodes {
-                return LeafEnumOutcome::BudgetExhausted { decodes };
+            // Zoom-out guard: abort once the discovery budget is hit, rather
+            // than walk the whole (barely-excluded) tree at hundreds of ms per
+            // node discovery.
+            if max_decodes != 0 && cache.discoveries >= max_decodes {
+                return LeafEnumOutcome::BudgetExhausted { discoveries: cache.discoveries };
             }
-            decodes += 1;
 
-            // 1.ii — decode (the bisection algorithm) and classify.
-            match decode_locate(
+            // 1.ii — locate the point (memoized bisection) and classify.
+            match cache.locate(
                 re, im, num_bits, initial_area, params, rng_seed, o, p, q, path_prefix,
             ) {
                 // 1.iii — contracted-away region: exclude the whole sliver.
@@ -171,20 +272,66 @@ mod tests {
         }
     }
 
+    fn rect_eq(a: &Rect, b: &Rect) -> bool {
+        a.re_min.0 == b.re_min.0
+            && a.re_max.0 == b.re_max.0
+            && a.im_min.0 == b.im_min.0
+            && a.im_max.0 == b.im_max.0
+    }
+
+    fn located_eq(a: &Located, b: &Located) -> bool {
+        match (a, b) {
+            (Located::Leaf { rect: ra, path: pa }, Located::Leaf { rect: rb, path: pb }) => {
+                pa == pb && rect_eq(ra, rb)
+            }
+            (Located::Dead { rect: ra }, Located::Dead { rect: rb }) => match (ra, rb) {
+                (Some(x), Some(y)) => rect_eq(x, y),
+                (None, None) => true,
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+
     #[test]
-    fn decode_budget_aborts_at_full_depth() {
-        // Full encode area at the real 32-bit depth: almost every sample is a
-        // fresh dead/leaf region (little gets excluded), so a small decode
-        // budget must abort instead of scanning the whole grid.
+    fn cached_matches_decode_locate() {
+        // The memoized cache must classify every point identically to the
+        // canonical (uncached) decode_locate — same leaf/path/rect, same dead
+        // sliver. This proves expand_node mirrors bisect_core exactly.
+        use crate::bisect::decode_locate;
+        let area = protocol::encode_area();
+        let params = protocol::encode_params();
+        let seed = protocol::ENCODE_RNG_SEED;
+        let mut cache = NodeCache::new();
+        let n = 12;
+        for r in 0..n {
+            for c in 0..n {
+                let re = Fixed::from_f64(-2.5 + 4.0 * (c as f64 + 0.5) / n as f64);
+                let im = Fixed::from_f64(-2.0 + 3.5 * (r as f64 + 0.5) / n as f64);
+                let cached =
+                    cache.locate(re, im, SHALLOW_BITS, area, &params, seed, 0, 0, 0, "O");
+                let reference =
+                    decode_locate(re, im, SHALLOW_BITS, area, &params, seed, 0, 0, 0, "O");
+                assert!(
+                    located_eq(&cached, &reference),
+                    "mismatch at ({c},{r}): cached={cached:?} ref={reference:?}",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn discovery_budget_aborts() {
+        // With a tiny discovery budget the scan must abort (zoom-out guard)
+        // rather than expand the whole tree.
         let out = enumerate_leaf_areas(
             -2.5, -2.0, 4.0 / 64.0, 64, 64, 4, 1000, /*max_decodes*/ 5,
             protocol::encode_area(), &protocol::encode_params(),
-            protocol::ENCODE_RNG_SEED, protocol::BITS_PER_POINT as usize,
-            0, 0, 0, "O",
+            protocol::ENCODE_RNG_SEED, SHALLOW_BITS, 0, 0, 0, "O",
         );
         assert!(
-            matches!(out, LeafEnumOutcome::BudgetExhausted { decodes } if decodes == 5),
-            "expected BudgetExhausted(5), got {out:?}",
+            matches!(out, LeafEnumOutcome::BudgetExhausted { discoveries } if discoveries >= 5),
+            "expected BudgetExhausted(>=5), got {out:?}",
         );
     }
 
@@ -239,3 +386,4 @@ mod tests {
         assert!(matches!(out, LeafEnumOutcome::Leaves(_)));
     }
 }
+

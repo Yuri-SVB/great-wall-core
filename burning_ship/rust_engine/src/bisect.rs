@@ -417,6 +417,130 @@ fn contracted_sliver(pre: &Rect, post: &Rect) -> Option<Rect> {
     }
 }
 
+/// One child of an expanded bisection node.
+#[derive(Clone, Debug)]
+pub(crate) struct ChildExpansion {
+    /// The child rectangle after any contraction.
+    pub area: Rect,
+    /// The contracted-away sliver (`Some` only for the larger, contracted child);
+    /// a point on this side that is outside `area` fell into this dead region.
+    pub dead_sliver: Option<Rect>,
+    /// Path letter appended for this child (l/L/r/R/u/U/d/D).
+    pub dir: char,
+    /// Good points filtered into this child — the next level's inherited seeds.
+    pub inherited_seeds: Vec<InheritedSeed>,
+}
+
+/// The point-independent expansion of one bisection node: the split plus both
+/// children.  This is exactly the per-level work `bisect_core` does, factored so
+/// it can be memoized by path (a node depends only on its path / area / inherited
+/// seeds, never on the specific point — the point only picks which child).
+#[derive(Clone, Debug)]
+pub(crate) struct NodeExpansion {
+    pub split_coord: Fixed,
+    pub split_vertical: bool,
+    pub lo: ChildExpansion,
+    pub hi: ChildExpansion,
+}
+
+/// Compute a node's expansion: discover islands, choose the split, and build
+/// both contracted children with their dead slivers, path letters, and inherited
+/// seeds.  Mirrors `bisect_core`'s per-level logic (verified equivalent to
+/// `decode_locate` by `leaf_enum`'s `cached_matches_decode_locate` test); used by
+/// the memoized viewport enumerator.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn expand_node(
+    area: Rect,
+    params: &DiscoveryParams,
+    rng_seed: u64,
+    o: u64,
+    p: u64,
+    q: u64,
+    path: &str,
+    inherited_seeds: &[InheritedSeed],
+) -> NodeExpansion {
+    let (islands, good_points) =
+        discover_islands(&area, params, rng_seed, o, p, q, path, inherited_seeds);
+
+    let split_vertical = area.is_wider();
+    let split_coord = if islands.is_empty() {
+        let (cre, cim) = area.center();
+        if split_vertical { cre } else { cim }
+    } else {
+        weighted_median_fixed(&islands, split_vertical)
+    };
+
+    let (child_lo, child_hi) = if split_vertical {
+        (
+            Rect { re_min: area.re_min, re_max: split_coord, im_min: area.im_min, im_max: area.im_max },
+            Rect { re_min: split_coord, re_max: area.re_max, im_min: area.im_min, im_max: area.im_max },
+        )
+    } else {
+        (
+            Rect { re_min: area.re_min, re_max: area.re_max, im_min: area.im_min, im_max: split_coord },
+            Rect { re_min: area.re_min, re_max: area.re_max, im_min: split_coord, im_max: area.im_max },
+        )
+    };
+
+    let lo_span = if split_vertical { split_coord.0 - area.re_min.0 } else { split_coord.0 - area.im_min.0 };
+    let hi_span = if split_vertical { area.re_max.0 - split_coord.0 } else { area.im_max.0 - split_coord.0 };
+    let larger_is_hi = hi_span >= lo_span;
+    let (cont_num, cont_den) = {
+        let s = lo_span.min(hi_span) as u64;
+        let l = lo_span.max(hi_span) as u64;
+        if l == 0 { (1u64, 1u64) } else { (l + CONTRACTION_MULTIPLIER * s, CONTRACTION_DIVISOR * l) }
+    };
+
+    let build = |side_hi: bool| -> ChildExpansion {
+        let mut chosen = if side_hi { child_hi } else { child_lo };
+        let pre = chosen;
+        let choose_hi = side_hi;
+        // The chosen child is contracted only when it is the larger one.
+        let chose_larger = choose_hi == larger_is_hi;
+        if chose_larger {
+            if split_vertical {
+                if side_hi {
+                    let d = chosen.re_max.0 - split_coord.0;
+                    chosen.re_max = Fixed(split_coord.0 + apply_contraction(d, cont_num, cont_den));
+                } else {
+                    let d = split_coord.0 - chosen.re_min.0;
+                    chosen.re_min = Fixed(split_coord.0 - apply_contraction(d, cont_num, cont_den));
+                }
+            } else if side_hi {
+                let d = chosen.im_max.0 - split_coord.0;
+                chosen.im_max = Fixed(split_coord.0 + apply_contraction(d, cont_num, cont_den));
+            } else {
+                let d = split_coord.0 - chosen.im_min.0;
+                chosen.im_min = Fixed(split_coord.0 - apply_contraction(d, cont_num, cont_den));
+            }
+        }
+        let dead_sliver = if chose_larger { contracted_sliver(&pre, &chosen) } else { None };
+        let dir = match (split_vertical, choose_hi, chose_larger) {
+            (true, false, false) => 'l',
+            (true, false, true) => 'L',
+            (true, true, false) => 'r',
+            (true, true, true) => 'R',
+            (false, true, false) => 'u',
+            (false, true, true) => 'U',
+            (false, false, false) => 'd',
+            (false, false, true) => 'D',
+        };
+        let inherited_seeds: Vec<InheritedSeed> = good_points
+            .iter()
+            .filter(|s| chosen.contains(s.re, s.im))
+            .cloned()
+            .collect();
+        ChildExpansion { area: chosen, dead_sliver, dir, inherited_seeds }
+    };
+
+    NodeExpansion {
+        split_coord,
+        split_vertical,
+        lo: build(false),
+        hi: build(true),
+    }
+}
+
 /// Encode a bit sequence into a fractal location.
 ///
 /// `path_prefix` is the accumulated path from prior points in the pipeline.
