@@ -105,10 +105,13 @@ pub struct BisectStep {
 /// For encode: bits are consumed from the input.
 /// For decode: bits are determined by point membership.
 ///
-/// Returns (final_rect, steps, bits, valid, path, inherited_seeds).
+/// Returns (final_rect, steps, bits, valid, path, inherited_seeds, dead_sliver).
 /// `valid` is true for encode (always valid) or when the decode point stays
 /// inside every contracted child.  It is false when the point falls in a
 /// region that was excluded by contraction of the larger half.
+/// `dead_sliver` is `Some(rect)` for an invalid decode: the contracted-away
+/// rectangle (at the first failing level) that the point fell into.  It is
+/// `None` for valid decodes (and for the degenerate case where no edge moved).
 #[allow(unused_variables)]
 fn bisect_core(
     initial_area: Rect,
@@ -128,11 +131,14 @@ fn bisect_core(
     // First point of a pipeline should pass "O".
     path_prefix: &str,
     initial_inherited_seeds: Vec<InheritedSeed>,
-) -> (Rect, Vec<BisectStep>, Vec<u8>, bool, String, Vec<InheritedSeed>) {
+) -> (Rect, Vec<BisectStep>, Vec<u8>, bool, String, Vec<InheritedSeed>, Option<Rect>) {
     let mut current = initial_area;
     let mut steps = Vec::with_capacity(num_bits);
     let mut output_bits = Vec::with_capacity(num_bits);
     let mut valid = true;
+    // For an invalid decode: the contracted-away sliver (at the first failing
+    // level) that the point fell into.  Stays None for valid decodes.
+    let mut dead_sliver: Option<Rect> = None;
     // Path string: start from prefix, append one direction letter per level.
     let mut path = String::with_capacity(path_prefix.len() + num_bits);
     path.push_str(path_prefix);
@@ -257,6 +263,9 @@ fn bisect_core(
         // Map bit to child: 0→left/up, 1→right/down
         let choose_hi = if split_vertical { bit == 1 } else { bit == 0 };
         let mut chosen = if choose_hi { child_hi } else { child_lo };
+        // Snapshot before contraction so the contracted-away sliver can be
+        // recovered if the decode point falls outside the contracted child.
+        let chosen_pre = chosen;
         let chose_larger = if larger_is_hi { choose_hi } else { !choose_hi };
 
         // Append direction to path string.
@@ -328,6 +337,9 @@ fn bisect_core(
                 log_verbose!("[bisect] bit {}: decode point ({:.6},{:.6}) OUTSIDE contracted child → invalid",
                           bit_index, pre.to_f64(), pim.to_f64());
                 valid = false;
+                // Record the contracted-away sliver the point landed in: the
+                // part of the chosen child cut off by contraction.
+                dead_sliver = contracted_sliver(&chosen_pre, &chosen);
             }
         }
 
@@ -380,7 +392,153 @@ fn bisect_core(
               current.width().to_f64(), current.height().to_f64(),
               path);
 
-    (current, steps, output_bits, valid, path, inherited_seeds)
+    (current, steps, output_bits, valid, path, inherited_seeds, dead_sliver)
+}
+
+/// The contracted-away rectangle: the part of `pre` cut off when it was
+/// contracted to `post`.  Contraction moves exactly one edge inward along the
+/// split axis, so `post` ⊆ `pre` and they differ on a single side.  The
+/// returned rect is the half-open region `pre \ post`, which contains every
+/// point that was inside `pre` but excluded from `post`.  Returns `None` if no
+/// edge moved (degenerate; should not occur once a decode is flagged invalid).
+fn contracted_sliver(pre: &Rect, post: &Rect) -> Option<Rect> {
+    if pre.re_min.0 != post.re_min.0 {
+        // re_min moved right: sliver is [pre.re_min, post.re_min) on re.
+        Some(Rect { re_min: pre.re_min, re_max: post.re_min, im_min: pre.im_min, im_max: pre.im_max })
+    } else if pre.re_max.0 != post.re_max.0 {
+        // re_max moved left: sliver is [post.re_max, pre.re_max) on re.
+        Some(Rect { re_min: post.re_max, re_max: pre.re_max, im_min: pre.im_min, im_max: pre.im_max })
+    } else if pre.im_min.0 != post.im_min.0 {
+        Some(Rect { re_min: pre.re_min, re_max: pre.re_max, im_min: pre.im_min, im_max: post.im_min })
+    } else if pre.im_max.0 != post.im_max.0 {
+        Some(Rect { re_min: pre.re_min, re_max: pre.re_max, im_min: post.im_max, im_max: pre.im_max })
+    } else {
+        None
+    }
+}
+
+/// One child of an expanded bisection node.
+#[derive(Clone, Debug)]
+pub(crate) struct ChildExpansion {
+    /// The child rectangle after any contraction.
+    pub area: Rect,
+    /// The contracted-away sliver (`Some` only for the larger, contracted child);
+    /// a point on this side that is outside `area` fell into this dead region.
+    pub dead_sliver: Option<Rect>,
+    /// Path letter appended for this child (l/L/r/R/u/U/d/D).
+    pub dir: char,
+    /// Good points filtered into this child — the next level's inherited seeds.
+    pub inherited_seeds: Vec<InheritedSeed>,
+}
+
+/// The point-independent expansion of one bisection node: the split plus both
+/// children.  This is exactly the per-level work `bisect_core` does, factored so
+/// it can be memoized by path (a node depends only on its path / area / inherited
+/// seeds, never on the specific point — the point only picks which child).
+#[derive(Clone, Debug)]
+pub(crate) struct NodeExpansion {
+    pub split_coord: Fixed,
+    pub split_vertical: bool,
+    pub lo: ChildExpansion,
+    pub hi: ChildExpansion,
+}
+
+/// Compute a node's expansion: discover islands, choose the split, and build
+/// both contracted children with their dead slivers, path letters, and inherited
+/// seeds.  Mirrors `bisect_core`'s per-level logic (verified equivalent to
+/// `decode_locate` by `leaf_enum`'s `cached_matches_decode_locate` test); used by
+/// the memoized viewport enumerator.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn expand_node(
+    area: Rect,
+    params: &DiscoveryParams,
+    rng_seed: u64,
+    o: u64,
+    p: u64,
+    q: u64,
+    path: &str,
+    inherited_seeds: &[InheritedSeed],
+) -> NodeExpansion {
+    let (islands, good_points) =
+        discover_islands(&area, params, rng_seed, o, p, q, path, inherited_seeds);
+
+    let split_vertical = area.is_wider();
+    let split_coord = if islands.is_empty() {
+        let (cre, cim) = area.center();
+        if split_vertical { cre } else { cim }
+    } else {
+        weighted_median_fixed(&islands, split_vertical)
+    };
+
+    let (child_lo, child_hi) = if split_vertical {
+        (
+            Rect { re_min: area.re_min, re_max: split_coord, im_min: area.im_min, im_max: area.im_max },
+            Rect { re_min: split_coord, re_max: area.re_max, im_min: area.im_min, im_max: area.im_max },
+        )
+    } else {
+        (
+            Rect { re_min: area.re_min, re_max: area.re_max, im_min: area.im_min, im_max: split_coord },
+            Rect { re_min: area.re_min, re_max: area.re_max, im_min: split_coord, im_max: area.im_max },
+        )
+    };
+
+    let lo_span = if split_vertical { split_coord.0 - area.re_min.0 } else { split_coord.0 - area.im_min.0 };
+    let hi_span = if split_vertical { area.re_max.0 - split_coord.0 } else { area.im_max.0 - split_coord.0 };
+    let larger_is_hi = hi_span >= lo_span;
+    let (cont_num, cont_den) = {
+        let s = lo_span.min(hi_span) as u64;
+        let l = lo_span.max(hi_span) as u64;
+        if l == 0 { (1u64, 1u64) } else { (l + CONTRACTION_MULTIPLIER * s, CONTRACTION_DIVISOR * l) }
+    };
+
+    let build = |side_hi: bool| -> ChildExpansion {
+        let mut chosen = if side_hi { child_hi } else { child_lo };
+        let pre = chosen;
+        let choose_hi = side_hi;
+        // The chosen child is contracted only when it is the larger one.
+        let chose_larger = choose_hi == larger_is_hi;
+        if chose_larger {
+            if split_vertical {
+                if side_hi {
+                    let d = chosen.re_max.0 - split_coord.0;
+                    chosen.re_max = Fixed(split_coord.0 + apply_contraction(d, cont_num, cont_den));
+                } else {
+                    let d = split_coord.0 - chosen.re_min.0;
+                    chosen.re_min = Fixed(split_coord.0 - apply_contraction(d, cont_num, cont_den));
+                }
+            } else if side_hi {
+                let d = chosen.im_max.0 - split_coord.0;
+                chosen.im_max = Fixed(split_coord.0 + apply_contraction(d, cont_num, cont_den));
+            } else {
+                let d = split_coord.0 - chosen.im_min.0;
+                chosen.im_min = Fixed(split_coord.0 - apply_contraction(d, cont_num, cont_den));
+            }
+        }
+        let dead_sliver = if chose_larger { contracted_sliver(&pre, &chosen) } else { None };
+        let dir = match (split_vertical, choose_hi, chose_larger) {
+            (true, false, false) => 'l',
+            (true, false, true) => 'L',
+            (true, true, false) => 'r',
+            (true, true, true) => 'R',
+            (false, true, false) => 'u',
+            (false, true, true) => 'U',
+            (false, false, false) => 'd',
+            (false, false, true) => 'D',
+        };
+        let inherited_seeds: Vec<InheritedSeed> = good_points
+            .iter()
+            .filter(|s| chosen.contains(s.re, s.im))
+            .cloned()
+            .collect();
+        ChildExpansion { area: chosen, dead_sliver, dir, inherited_seeds }
+    };
+
+    NodeExpansion {
+        split_coord,
+        split_vertical,
+        lo: build(false),
+        hi: build(true),
+    }
 }
 
 /// Encode a bit sequence into a fractal location.
@@ -413,7 +571,7 @@ pub fn encode_with_seeds(
     path_prefix: &str,
     initial_seeds: Vec<InheritedSeed>,
 ) -> EncodeResult {
-    let (final_rect, steps, _, _valid, path, inherited_seeds) = bisect_core(
+    let (final_rect, steps, _, _valid, path, inherited_seeds, _dead) = bisect_core(
         initial_area, params, rng_seed, seed_bits.len(),
         Some(seed_bits), None, o, p, q, path_prefix, initial_seeds,
     );
@@ -445,11 +603,60 @@ pub fn decode(
     q: u64,
     path_prefix: &str,
 ) -> Vec<u8> {
-    let (_, _, bits, _valid, _path, _seeds) = bisect_core(
+    let (_, _, bits, _valid, _path, _seeds, _dead) = bisect_core(
         initial_area, params, rng_seed, num_bits,
         None, Some((point_re, point_im)), o, p, q, path_prefix, Vec::new(),
     );
     bits
+}
+
+/// Outcome of locating a point in the bisection tree (decode + classify).
+///
+/// Used by viewport leaf-area enumeration: a point is either inside a valid
+/// leaf area (the final contracted rectangle) or inside a region that was
+/// contracted away at some bisection level.
+#[derive(Clone, Debug)]
+pub enum Located {
+    /// The point lies in a valid leaf area.
+    Leaf {
+        /// The leaf rectangle (identical for every point sharing `path`).
+        rect: Rect,
+        /// The bisection path — the canonical identity of the leaf area.
+        path: String,
+    },
+    /// The point lies in a contracted-away region (no valid leaf lives here).
+    Dead {
+        /// The contracted-away sliver containing the point, or `None` if it
+        /// could not be determined (caller should then skip just this sample).
+        rect: Option<Rect>,
+    },
+}
+
+/// Decode a point and classify it as a valid leaf area or a contracted-away
+/// (dead) region.  This is the per-pixel primitive for viewport leaf-area
+/// enumeration (`leaf_enum::enumerate_leaf_areas`).
+#[allow(clippy::too_many_arguments)]
+pub fn decode_locate(
+    point_re: Fixed,
+    point_im: Fixed,
+    num_bits: usize,
+    initial_area: Rect,
+    params: &DiscoveryParams,
+    rng_seed: u64,
+    o: u64,
+    p: u64,
+    q: u64,
+    path_prefix: &str,
+) -> Located {
+    let (final_rect, _steps, _bits, valid, path, _seeds, dead) = bisect_core(
+        initial_area, params, rng_seed, num_bits,
+        None, Some((point_re, point_im)), o, p, q, path_prefix, Vec::new(),
+    );
+    if valid {
+        Located::Leaf { rect: final_rect, path }
+    } else {
+        Located::Dead { rect: dead }
+    }
 }
 
 /// Decode a point back to bits, also returning the final leaf rectangle and
@@ -466,7 +673,7 @@ pub fn decode_full(
     q: u64,
     path_prefix: &str,
 ) -> (Vec<u8>, Rect, bool, String, Vec<BisectStep>) {
-    let (final_rect, steps, bits, valid, path, _seeds) = bisect_core(
+    let (final_rect, steps, bits, valid, path, _seeds, _dead) = bisect_core(
         initial_area, params, rng_seed, num_bits,
         None, Some((point_re, point_im)), o, p, q, path_prefix, Vec::new(),
     );

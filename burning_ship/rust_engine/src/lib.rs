@@ -26,6 +26,7 @@ pub mod fixed;
 pub mod fractal;
 pub mod discovery;
 pub mod bisect;
+pub mod leaf_enum;
 pub mod render_cache;
 pub mod argon2_hash;
 pub mod text;

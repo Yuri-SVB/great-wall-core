@@ -956,3 +956,309 @@ pub extern "C" fn bs_bits_per_point() -> u32 {
     crate::protocol::BITS_PER_POINT
 }
 
+// -----------------------------------------------------------------------
+// Viewport leaf-area enumeration
+// -----------------------------------------------------------------------
+//
+// Determines which distinct canonical leaf areas are present in a view, so the
+// UX layer can highlight them.  Handle-based because the result is a
+// variable-length list: compute once, then read the count and copy each leaf's
+// rect + path without re-scanning.
+
+use crate::leaf_enum::{enumerate_leaf_areas, LeafEnumOutcome};
+
+/// Opaque handle holding a leaf-area enumeration result.
+pub struct LeafAreasHandle {
+    outcome: LeafEnumOutcome,
+}
+
+/// Enumerate the distinct leaf areas visible in a view.
+///
+/// The view is described as in [`bs_render_viewport`]: pixel `(col, row)` maps
+/// to `(origin_re + col*step, origin_im + row*step)`.  Sampling steps by
+/// `scan_step` pixels on both axes; at most `max_leaves` distinct leaf areas
+/// are registered before the result switches to the "too many" status.
+///
+/// Returns an opaque handle; query it with the `bs_leaf_areas_*` functions and
+/// free it with [`bs_leaf_areas_free`].
+#[no_mangle]
+pub extern "C" fn bs_leaf_areas_compute(
+    origin_re: f64,
+    origin_im: f64,
+    step: f64,
+    width_px: u32,
+    height_px: u32,
+    scan_step: u32,
+    max_leaves: u32,
+    // Zoom-out guard: max non-excluded decodes before aborting (0 = unbounded).
+    max_decodes: u32,
+    // Initial (encode) area
+    area_re_min: Fixed,
+    area_re_max: Fixed,
+    area_im_min: Fixed,
+    area_im_max: Fixed,
+    // Discovery params
+    max_iter: u32,
+    target_good: u32,
+    max_flood_points: u64,
+    min_grid_cells: u64,
+    p_max_shift: u32,
+    exclusion_threshold_num: u32,
+    rng_seed: u64,
+    num_bits: u32,
+    o: u64,
+    p: u64,
+    q: u64,
+    path_prefix: *const u8,
+    path_prefix_len: u32,
+) -> *mut LeafAreasHandle {
+    let prefix = if path_prefix.is_null() || path_prefix_len == 0 {
+        "O"
+    } else {
+        unsafe { std::str::from_utf8_unchecked(slice::from_raw_parts(path_prefix, path_prefix_len as usize)) }
+    };
+    let area = Rect { re_min: area_re_min, re_max: area_re_max, im_min: area_im_min, im_max: area_im_max };
+    let params = DiscoveryParams {
+        max_iter,
+        min_grid_cells,
+        p_max_shift,
+        max_flood_points,
+        target_good,
+        exclusion_threshold_num,
+        max_attempts: DEFAULT_MAX_ATTEMPTS,
+    };
+
+    let outcome = enumerate_leaf_areas(
+        origin_re, origin_im, step, width_px, height_px, scan_step,
+        max_leaves as usize, max_decodes as usize, area, &params, rng_seed,
+        num_bits as usize, o, p, q, prefix,
+    );
+    Box::into_raw(Box::new(LeafAreasHandle { outcome }))
+}
+
+/// Result status: `0` = a list of leaf areas is available (query with
+/// [`bs_leaf_areas_count`] / [`bs_leaf_areas_rect`] / [`bs_leaf_areas_path`]);
+/// `1` = more than `max_leaves` distinct leaf areas are present; `2` = the
+/// decode budget was hit before finishing (zoom-out).  For both `1` and `2`
+/// the UX should prompt the user to zoom in.
+#[no_mangle]
+pub extern "C" fn bs_leaf_areas_status(handle: *const LeafAreasHandle) -> i32 {
+    let h = unsafe { &*handle };
+    match h.outcome {
+        LeafEnumOutcome::Leaves(_) => 0,
+        LeafEnumOutcome::TooMany { .. } => 1,
+        LeafEnumOutcome::BudgetExhausted { .. } => 2,
+    }
+}
+
+/// Number of registered leaf areas (0 unless the status is `0`).
+#[no_mangle]
+pub extern "C" fn bs_leaf_areas_count(handle: *const LeafAreasHandle) -> u32 {
+    let h = unsafe { &*handle };
+    match &h.outcome {
+        LeafEnumOutcome::Leaves(l) => l.len() as u32,
+        _ => 0,
+    }
+}
+
+/// Write leaf `idx`'s rectangle as Fixed `[re_min, re_max, im_min, im_max]`
+/// into `out_rect` (4 elements).  No-op if `idx` is out of range.
+#[no_mangle]
+pub extern "C" fn bs_leaf_areas_rect(
+    handle: *const LeafAreasHandle,
+    idx: u32,
+    out_rect: *mut Fixed,
+) {
+    let h = unsafe { &*handle };
+    if let LeafEnumOutcome::Leaves(leaves) = &h.outcome {
+        if let Some(leaf) = leaves.get(idx as usize) {
+            unsafe {
+                let rect = slice::from_raw_parts_mut(out_rect, 4);
+                rect[0] = leaf.rect.re_min;
+                rect[1] = leaf.rect.re_max;
+                rect[2] = leaf.rect.im_min;
+                rect[3] = leaf.rect.im_max;
+            }
+        }
+    }
+}
+
+/// Copy leaf `idx`'s bisection path (its canonical identity) into `out_buf` as
+/// a NUL-terminated UTF-8 string, writing up to `buf_len` bytes including the
+/// terminator.  Returns the full path length in bytes (excluding NUL), even if
+/// truncated; returns 0 for an out-of-range index.
+#[no_mangle]
+pub extern "C" fn bs_leaf_areas_path(
+    handle: *const LeafAreasHandle,
+    idx: u32,
+    out_buf: *mut u8,
+    buf_len: u32,
+) -> u32 {
+    let h = unsafe { &*handle };
+    let path_bytes = match &h.outcome {
+        LeafEnumOutcome::Leaves(leaves) => match leaves.get(idx as usize) {
+            Some(leaf) => leaf.path.as_bytes(),
+            None => return 0,
+        },
+        _ => return 0,
+    };
+    if !out_buf.is_null() && buf_len > 0 {
+        let copy_len = std::cmp::min(path_bytes.len(), (buf_len - 1) as usize);
+        let out = unsafe { slice::from_raw_parts_mut(out_buf, buf_len as usize) };
+        out[..copy_len].copy_from_slice(&path_bytes[..copy_len]);
+        out[copy_len] = 0; // NUL terminator
+    }
+    path_bytes.len() as u32
+}
+
+/// Free a leaf-areas handle.
+#[no_mangle]
+pub extern "C" fn bs_leaf_areas_free(handle: *mut LeafAreasHandle) {
+    if !handle.is_null() {
+        unsafe { drop(Box::from_raw(handle)) };
+    }
+}
+
+// -----------------------------------------------------------------------
+// Canonical island (per-leaf visualisation shape)
+// -----------------------------------------------------------------------
+//
+// For a leaf area, selects its canonical island and exposes the island's
+// flood points so the UX can draw the shape (the union of pixel_delta cells).
+// Handle-based because the point set is variable-length: compute once, read the
+// metadata, then copy the points.
+
+use crate::discovery::{canonical_island, CanonicalIsland};
+
+/// Opaque handle holding a canonical-island result (`None` if no island found).
+pub struct CanonicalIslandHandle {
+    island: Option<CanonicalIsland>,
+}
+
+/// Select the canonical island of a leaf rectangle (`bs_canonical_island_*`).
+///
+/// `path` should be the leaf's bisection path (from `bs_decode_full` /
+/// `bs_leaf_areas_path`), and `(o, p, q)` the same fractal the leaf was decoded
+/// on.  The discovery params are a visualisation choice (resolution / flood
+/// cap), independent of the encoder's.  Returns an opaque handle; query it with
+/// the other `bs_canonical_island_*` functions and free with
+/// [`bs_canonical_island_free`].
+#[no_mangle]
+pub extern "C" fn bs_canonical_island_compute(
+    area_re_min: Fixed,
+    area_re_max: Fixed,
+    area_im_min: Fixed,
+    area_im_max: Fixed,
+    max_iter: u32,
+    target_good: u32,
+    max_flood_points: u64,
+    min_grid_cells: u64,
+    p_max_shift: u32,
+    exclusion_threshold_num: u32,
+    rng_seed: u64,
+    o: u64,
+    p: u64,
+    q: u64,
+    path: *const u8,
+    path_len: u32,
+) -> *mut CanonicalIslandHandle {
+    let path_str = if path.is_null() || path_len == 0 {
+        "O"
+    } else {
+        unsafe { std::str::from_utf8_unchecked(slice::from_raw_parts(path, path_len as usize)) }
+    };
+    let area = Rect { re_min: area_re_min, re_max: area_re_max, im_min: area_im_min, im_max: area_im_max };
+    let params = DiscoveryParams {
+        max_iter,
+        min_grid_cells,
+        p_max_shift,
+        max_flood_points,
+        target_good,
+        exclusion_threshold_num,
+        max_attempts: DEFAULT_MAX_ATTEMPTS,
+    };
+    let island = canonical_island(&area, &params, rng_seed, o, p, q, path_str);
+    Box::into_raw(Box::new(CanonicalIslandHandle { island }))
+}
+
+/// `1` if a canonical island was found, `0` otherwise.
+#[no_mangle]
+pub extern "C" fn bs_canonical_island_found(handle: *const CanonicalIslandHandle) -> i32 {
+    let h = unsafe { &*handle };
+    if h.island.is_some() { 1 } else { 0 }
+}
+
+/// Write the island metadata: escape count, pixel (cell) count, `pixel_delta`
+/// grid spacing (Fixed), and bounding box `[re_min, re_max, im_min, im_max]`
+/// (Fixed).  Any out pointer may be null to skip it; all are left untouched if
+/// no island was found.
+#[no_mangle]
+pub extern "C" fn bs_canonical_island_meta(
+    handle: *const CanonicalIslandHandle,
+    out_escape: *mut u32,
+    out_pixel_count: *mut u64,
+    out_pixel_delta: *mut Fixed,
+    out_bbox: *mut Fixed,
+) {
+    let h = unsafe { &*handle };
+    if let Some(island) = &h.island {
+        unsafe {
+            if !out_escape.is_null() { *out_escape = island.escape_count; }
+            if !out_pixel_count.is_null() { *out_pixel_count = island.pixel_count; }
+            if !out_pixel_delta.is_null() { *out_pixel_delta = island.pixel_delta; }
+            if !out_bbox.is_null() {
+                let bbox = slice::from_raw_parts_mut(out_bbox, 4);
+                bbox[0] = island.bbox.re_min;
+                bbox[1] = island.bbox.re_max;
+                bbox[2] = island.bbox.im_min;
+                bbox[3] = island.bbox.im_max;
+            }
+        }
+    }
+}
+
+/// Number of flood points in the canonical island (0 if none found).
+#[no_mangle]
+pub extern "C" fn bs_canonical_island_num_points(handle: *const CanonicalIslandHandle) -> u32 {
+    let h = unsafe { &*handle };
+    match &h.island {
+        Some(island) => island.points.len() as u32,
+        None => 0,
+    }
+}
+
+/// Copy the island's flood points into `out_points` as interleaved Fixed pairs
+/// `[re0, im0, re1, im1, ...]`.  `max_points` is the capacity in *points*
+/// (`out_points` must hold `2 * max_points` Fixed).  Returns the number of
+/// points actually written (`min(num_points, max_points)`).
+#[no_mangle]
+pub extern "C" fn bs_canonical_island_points(
+    handle: *const CanonicalIslandHandle,
+    out_points: *mut Fixed,
+    max_points: u32,
+) -> u32 {
+    let h = unsafe { &*handle };
+    let island = match &h.island {
+        Some(island) => island,
+        None => return 0,
+    };
+    if out_points.is_null() || max_points == 0 {
+        return 0;
+    }
+    let n = island.points.len().min(max_points as usize);
+    let out = unsafe { slice::from_raw_parts_mut(out_points, n * 2) };
+    for (i, &(re, im)) in island.points.iter().take(n).enumerate() {
+        out[i * 2] = re;
+        out[i * 2 + 1] = im;
+    }
+    n as u32
+}
+
+/// Free a canonical-island handle.
+#[no_mangle]
+pub extern "C" fn bs_canonical_island_free(handle: *mut CanonicalIslandHandle) {
+    if !handle.is_null() {
+        unsafe { drop(Box::from_raw(handle)) };
+    }
+}
+
