@@ -1114,3 +1114,146 @@ pub extern "C" fn bs_leaf_areas_free(handle: *mut LeafAreasHandle) {
     }
 }
 
+// -----------------------------------------------------------------------
+// Canonical island (per-leaf visualisation shape)
+// -----------------------------------------------------------------------
+//
+// For a leaf area, selects its canonical island and exposes the island's
+// flood points so the UX can draw the shape (the union of pixel_delta cells).
+// Handle-based because the point set is variable-length: compute once, read the
+// metadata, then copy the points.
+
+use crate::discovery::{canonical_island, CanonicalIsland};
+
+/// Opaque handle holding a canonical-island result (`None` if no island found).
+pub struct CanonicalIslandHandle {
+    island: Option<CanonicalIsland>,
+}
+
+/// Select the canonical island of a leaf rectangle (`bs_canonical_island_*`).
+///
+/// `path` should be the leaf's bisection path (from `bs_decode_full` /
+/// `bs_leaf_areas_path`), and `(o, p, q)` the same fractal the leaf was decoded
+/// on.  The discovery params are a visualisation choice (resolution / flood
+/// cap), independent of the encoder's.  Returns an opaque handle; query it with
+/// the other `bs_canonical_island_*` functions and free with
+/// [`bs_canonical_island_free`].
+#[no_mangle]
+pub extern "C" fn bs_canonical_island_compute(
+    area_re_min: Fixed,
+    area_re_max: Fixed,
+    area_im_min: Fixed,
+    area_im_max: Fixed,
+    max_iter: u32,
+    target_good: u32,
+    max_flood_points: u64,
+    min_grid_cells: u64,
+    p_max_shift: u32,
+    exclusion_threshold_num: u32,
+    rng_seed: u64,
+    o: u64,
+    p: u64,
+    q: u64,
+    path: *const u8,
+    path_len: u32,
+) -> *mut CanonicalIslandHandle {
+    let path_str = if path.is_null() || path_len == 0 {
+        "O"
+    } else {
+        unsafe { std::str::from_utf8_unchecked(slice::from_raw_parts(path, path_len as usize)) }
+    };
+    let area = Rect { re_min: area_re_min, re_max: area_re_max, im_min: area_im_min, im_max: area_im_max };
+    let params = DiscoveryParams {
+        max_iter,
+        min_grid_cells,
+        p_max_shift,
+        max_flood_points,
+        target_good,
+        exclusion_threshold_num,
+        max_attempts: DEFAULT_MAX_ATTEMPTS,
+    };
+    let island = canonical_island(&area, &params, rng_seed, o, p, q, path_str);
+    Box::into_raw(Box::new(CanonicalIslandHandle { island }))
+}
+
+/// `1` if a canonical island was found, `0` otherwise.
+#[no_mangle]
+pub extern "C" fn bs_canonical_island_found(handle: *const CanonicalIslandHandle) -> i32 {
+    let h = unsafe { &*handle };
+    if h.island.is_some() { 1 } else { 0 }
+}
+
+/// Write the island metadata: escape count, pixel (cell) count, `pixel_delta`
+/// grid spacing (Fixed), and bounding box `[re_min, re_max, im_min, im_max]`
+/// (Fixed).  Any out pointer may be null to skip it; all are left untouched if
+/// no island was found.
+#[no_mangle]
+pub extern "C" fn bs_canonical_island_meta(
+    handle: *const CanonicalIslandHandle,
+    out_escape: *mut u32,
+    out_pixel_count: *mut u64,
+    out_pixel_delta: *mut Fixed,
+    out_bbox: *mut Fixed,
+) {
+    let h = unsafe { &*handle };
+    if let Some(island) = &h.island {
+        unsafe {
+            if !out_escape.is_null() { *out_escape = island.escape_count; }
+            if !out_pixel_count.is_null() { *out_pixel_count = island.pixel_count; }
+            if !out_pixel_delta.is_null() { *out_pixel_delta = island.pixel_delta; }
+            if !out_bbox.is_null() {
+                let bbox = slice::from_raw_parts_mut(out_bbox, 4);
+                bbox[0] = island.bbox.re_min;
+                bbox[1] = island.bbox.re_max;
+                bbox[2] = island.bbox.im_min;
+                bbox[3] = island.bbox.im_max;
+            }
+        }
+    }
+}
+
+/// Number of flood points in the canonical island (0 if none found).
+#[no_mangle]
+pub extern "C" fn bs_canonical_island_num_points(handle: *const CanonicalIslandHandle) -> u32 {
+    let h = unsafe { &*handle };
+    match &h.island {
+        Some(island) => island.points.len() as u32,
+        None => 0,
+    }
+}
+
+/// Copy the island's flood points into `out_points` as interleaved Fixed pairs
+/// `[re0, im0, re1, im1, ...]`.  `max_points` is the capacity in *points*
+/// (`out_points` must hold `2 * max_points` Fixed).  Returns the number of
+/// points actually written (`min(num_points, max_points)`).
+#[no_mangle]
+pub extern "C" fn bs_canonical_island_points(
+    handle: *const CanonicalIslandHandle,
+    out_points: *mut Fixed,
+    max_points: u32,
+) -> u32 {
+    let h = unsafe { &*handle };
+    let island = match &h.island {
+        Some(island) => island,
+        None => return 0,
+    };
+    if out_points.is_null() || max_points == 0 {
+        return 0;
+    }
+    let n = island.points.len().min(max_points as usize);
+    let out = unsafe { slice::from_raw_parts_mut(out_points, n * 2) };
+    for (i, &(re, im)) in island.points.iter().take(n).enumerate() {
+        out[i * 2] = re;
+        out[i * 2 + 1] = im;
+    }
+    n as u32
+}
+
+/// Free a canonical-island handle.
+#[no_mangle]
+pub extern "C" fn bs_canonical_island_free(handle: *mut CanonicalIslandHandle) {
+    if !handle.is_null() {
+        unsafe { drop(Box::from_raw(handle)) };
+    }
+}
+

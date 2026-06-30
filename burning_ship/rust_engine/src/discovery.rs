@@ -619,11 +619,12 @@ pub struct InheritedSeed {
 /// area that fall within this child area.  They are re-flood-filled first
 /// (before random sampling) to give the child a head start.
 ///
-/// Returns `(islands, all_good_points)` where `all_good_points` contains
-/// every flood-filled point (with escape count) from every good island,
-/// suitable for filtering and passing as inherited seeds to child areas.
+/// Returns `(islands, island_points)` where `island_points[j]` holds every
+/// flood-filled point of `islands[j]` (cell centres spaced `pixel_delta`), in
+/// discovery order.  The public [`discover_islands`] wrapper flattens these
+/// into inherited seeds; [`canonical_island`] uses one island's set directly.
 #[allow(unused_variables, unused_assignments)]
-pub fn discover_islands(
+fn discover_islands_impl(
     area: &Rect,
     params: &DiscoveryParams,
     rng_seed: u64,
@@ -632,7 +633,7 @@ pub fn discover_islands(
     q: u64,
     path: &str,
     inherited_seeds: &[InheritedSeed],
-) -> (Vec<Island>, Vec<InheritedSeed>) {
+) -> (Vec<Island>, Vec<Vec<(Fixed, Fixed)>>) {
     let gen = PointGen::new(o, p, q, path, rng_seed);
     let mut islands: Vec<Island> = Vec::new();
     let mut store = FloodFillStore::new();
@@ -659,8 +660,8 @@ pub fn discover_islands(
               Fixed(collision_radius).to_f64(), total_area,
               inherited_seeds.len());
 
-    // Accumulates all flood-filled points from good islands (for inheritance).
-    let mut all_good_points: Vec<InheritedSeed> = Vec::new();
+    // Per-island flood points, parallel to `islands` (in discovery order).
+    let mut island_points: Vec<Vec<(Fixed, Fixed)>> = Vec::new();
 
     // Phase 1: Re-flood-fill inherited seeds from the parent area.
     // Many seeds will be redundant (same island at the new resolution);
@@ -688,10 +689,9 @@ pub fn discover_islands(
                               island.escape_count, island.pixel_count,
                               island.pixel_delta.to_f64(),
                               island.center_re.to_f64(), island.center_im.to_f64());
-                    // Collect all flood-filled points for inheritance.
-                    for &(re, im) in &pts {
-                        all_good_points.push(InheritedSeed { re, im, escape_count: island.escape_count });
-                    }
+                    // Keep this island's flood points (parallel to `islands`),
+                    // for inheritance and the canonical-island shape.
+                    island_points.push(pts);
                     islands.push(island);
                 }
             }
@@ -767,10 +767,9 @@ pub fn discover_islands(
                               island.pixel_delta.to_f64(),
                               island.center_re.to_f64(), island.center_im.to_f64(),
                               bbox_w, bbox_h);
-                    // Collect all flood-filled points for inheritance.
-                    for &(re, im) in &pts {
-                        all_good_points.push(InheritedSeed { re, im, escape_count: island.escape_count });
-                    }
+                    // Keep this island's flood points (parallel to `islands`),
+                    // for inheritance and the canonical-island shape.
+                    island_points.push(pts);
                     islands.push(island);
                 }
             }
@@ -827,14 +826,128 @@ pub fn discover_islands(
               islands.len(), attempts, stop_reason,
               skip_collision, skip_non_esc, skip_low_esc, excl_pct,
               min_pixels, max_pixels, single_pixel_count,
-              min_esc, max_esc, good_total_area, all_good_points.len());
+              min_esc, max_esc, good_total_area,
+              island_points.iter().map(|v| v.len()).sum::<usize>());
 
+    (islands, island_points)
+}
+
+/// Discover islands within a rectangular area (the encode/decode entry point).
+///
+/// Returns `(islands, all_good_points)` where `all_good_points` contains every
+/// flood-filled point (with escape count) from every good island, in discovery
+/// order — suitable for filtering and passing as inherited seeds to children.
+#[allow(clippy::too_many_arguments)]
+pub fn discover_islands(
+    area: &Rect,
+    params: &DiscoveryParams,
+    rng_seed: u64,
+    o: u64,
+    p: u64,
+    q: u64,
+    path: &str,
+    inherited_seeds: &[InheritedSeed],
+) -> (Vec<Island>, Vec<InheritedSeed>) {
+    let (islands, island_points) =
+        discover_islands_impl(area, params, rng_seed, o, p, q, path, inherited_seeds);
+    let mut all_good_points: Vec<InheritedSeed> = Vec::new();
+    for (isl, pts) in islands.iter().zip(island_points.iter()) {
+        for &(re, im) in pts {
+            all_good_points.push(InheritedSeed { re, im, escape_count: isl.escape_count });
+        }
+    }
     (islands, all_good_points)
+}
+
+/// The canonical island of a leaf area: the single distinguished island used
+/// for **visualisation only** (never for the encoded bits).  It is the island
+/// with the largest `pixel_count`; ties break to the earliest discovery order.
+#[derive(Clone, Debug)]
+pub struct CanonicalIsland {
+    /// Escape count shared by every point of the island.
+    pub escape_count: u32,
+    /// Measured area as pixel (cell) count.
+    pub pixel_count: u64,
+    /// Grid spacing of the flood fill — each point centres a `pixel_delta`²
+    /// cell; the union of cells is the island's shape.
+    pub pixel_delta: Fixed,
+    /// Bounding box of the island.
+    pub bbox: Rect,
+    /// Every flood-fill point of the island.
+    pub points: Vec<(Fixed, Fixed)>,
+}
+
+/// Select the canonical island of `area` (typically a decoded leaf rectangle).
+///
+/// Runs discovery fresh over `area` with **no inherited seeds** — a leaf is
+/// never itself split, so its island set is defined solely by this discovery —
+/// then returns the largest island (ties → earliest discovery order) together
+/// with all its flood points.  Returns `None` if no good island is found.
+///
+/// The discovery `params` are a **visualisation** choice (resolution / flood
+/// cap), independent of the encoder's parameters; only `area` and `(o, p, q)`
+/// must match the decode so the island sits on the displayed fractal.
+#[allow(clippy::too_many_arguments)]
+pub fn canonical_island(
+    area: &Rect,
+    params: &DiscoveryParams,
+    rng_seed: u64,
+    o: u64,
+    p: u64,
+    q: u64,
+    path: &str,
+) -> Option<CanonicalIsland> {
+    let (islands, island_points) =
+        discover_islands_impl(area, params, rng_seed, o, p, q, path, &[]);
+    let mut best: Option<usize> = None;
+    for (i, isl) in islands.iter().enumerate() {
+        match best {
+            None => best = Some(i),
+            // Strict `>` keeps the earliest island on ties (discovery order).
+            Some(b) => {
+                if isl.pixel_count > islands[b].pixel_count {
+                    best = Some(i);
+                }
+            }
+        }
+    }
+    best.map(|i| CanonicalIsland {
+        escape_count: islands[i].escape_count,
+        pixel_count: islands[i].pixel_count,
+        pixel_delta: islands[i].pixel_delta,
+        bbox: islands[i].bbox,
+        points: island_points[i].clone(),
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn canonical_island_is_largest_and_deterministic() {
+        let area = crate::protocol::encode_area();
+        let mut params = crate::protocol::encode_params();
+        // Visualisation params: allow a real shape without scanning forever.
+        params.target_good = 8;
+        params.max_flood_points = 10_000;
+        let seed = crate::protocol::ENCODE_RNG_SEED;
+
+        let a = canonical_island(&area, &params, seed, 0, 0, 0, "O")
+            .expect("the encode area contains at least one island");
+        let b = canonical_island(&area, &params, seed, 0, 0, 0, "O").unwrap();
+
+        // Deterministic: identical point set across runs.
+        assert_eq!(a.points, b.points, "canonical island must be deterministic");
+        assert!(!a.points.is_empty());
+        // Every flood point is a cell of the island.
+        assert_eq!(a.points.len() as u64, a.pixel_count);
+
+        // It is the largest island the same discovery finds.
+        let (islands, _) = discover_islands(&area, &params, seed, 0, 0, 0, "O", &[]);
+        let max = islands.iter().map(|i| i.pixel_count).max().unwrap();
+        assert_eq!(a.pixel_count, max, "canonical island must be the largest");
+    }
 
     #[test]
     fn test_fixed_log2_exact_powers_of_two() {
