@@ -43,6 +43,12 @@ pub enum LeafEnumOutcome {
     /// More than `max_leaves` distinct leaf areas are present; the caller
     /// should ask the user to zoom in.  Carries the cap that was exceeded.
     TooMany { max: usize },
+    /// The decode budget (`max_decodes`) was hit before the scan finished.
+    /// This is the zoom-out guard: when little is excluded, the scan would
+    /// otherwise decode a huge grid at hundreds of ms per point.  The view is
+    /// too dense/dead to enumerate here — the caller should ask the user to
+    /// zoom in.  Carries the number of decodes performed.
+    BudgetExhausted { decodes: usize },
 }
 
 /// Enumerate the distinct canonical leaf areas visible in a view.
@@ -53,6 +59,12 @@ pub enum LeafEnumOutcome {
 /// `scan_step` pixels on both axes (clamped to ≥ 1).  The decode parameters
 /// (`initial_area`, `params`, `rng_seed`, `num_bits`, `o`, `p`, `q`,
 /// `path_prefix`) are exactly those used elsewhere for decoding.
+///
+/// `max_decodes` bounds the total number of (non-excluded) decodes — the
+/// zoom-out guard.  A decode is ~hundreds of ms, so at zoom-out, where almost
+/// nothing is excluded, an unbounded scan would decode the whole grid and hang.
+/// On hitting the budget the scan aborts with [`LeafEnumOutcome::BudgetExhausted`].
+/// `0` disables the budget (unbounded).
 #[allow(clippy::too_many_arguments)]
 pub fn enumerate_leaf_areas(
     origin_re: f64,
@@ -62,6 +74,7 @@ pub fn enumerate_leaf_areas(
     height_px: u32,
     scan_step: u32,
     max_leaves: usize,
+    max_decodes: usize,
     initial_area: Rect,
     params: &DiscoveryParams,
     rng_seed: u64,
@@ -77,6 +90,8 @@ pub fn enumerate_leaf_areas(
     let mut exclusions: Vec<Rect> = Vec::new();
     let mut leaves: Vec<LeafArea> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
+    // Count of (non-excluded) decodes performed — bounded by `max_decodes`.
+    let mut decodes: usize = 0;
 
     for row in (0..height_px).step_by(scan) {
         let im = Fixed::from_f64(origin_im + row as f64 * step);
@@ -87,6 +102,13 @@ pub fn enumerate_leaf_areas(
             if exclusions.iter().any(|r| r.contains(re, im)) {
                 continue;
             }
+
+            // Zoom-out guard: abort once the decode budget is hit, rather than
+            // decode the whole (barely-excluded) grid at hundreds of ms each.
+            if max_decodes != 0 && decodes >= max_decodes {
+                return LeafEnumOutcome::BudgetExhausted { decodes };
+            }
+            decodes += 1;
 
             // 1.ii — decode (the bisection algorithm) and classify.
             match decode_locate(
@@ -133,9 +155,10 @@ mod tests {
     const SHALLOW_BITS: usize = 4;
 
     // Scan the full encode area on a 64×64 grid, sampling every 4 px.
+    // No decode budget (0) — these shallow-depth scans finish quickly.
     fn enumerate_full_encode(max_leaves: usize, num_bits: usize) -> LeafEnumOutcome {
         enumerate_leaf_areas(
-            -2.5, -2.0, 4.0 / 64.0, 64, 64, 4, max_leaves,
+            -2.5, -2.0, 4.0 / 64.0, 64, 64, 4, max_leaves, 0,
             protocol::encode_area(), &protocol::encode_params(),
             protocol::ENCODE_RNG_SEED, num_bits, 0, 0, 0, "O",
         )
@@ -144,8 +167,25 @@ mod tests {
     fn leaves_of(outcome: LeafEnumOutcome) -> Vec<LeafArea> {
         match outcome {
             LeafEnumOutcome::Leaves(l) => l,
-            LeafEnumOutcome::TooMany { max } => panic!("unexpected TooMany(max={max})"),
+            other => panic!("unexpected non-Leaves outcome: {other:?}"),
         }
+    }
+
+    #[test]
+    fn decode_budget_aborts_at_full_depth() {
+        // Full encode area at the real 32-bit depth: almost every sample is a
+        // fresh dead/leaf region (little gets excluded), so a small decode
+        // budget must abort instead of scanning the whole grid.
+        let out = enumerate_leaf_areas(
+            -2.5, -2.0, 4.0 / 64.0, 64, 64, 4, 1000, /*max_decodes*/ 5,
+            protocol::encode_area(), &protocol::encode_params(),
+            protocol::ENCODE_RNG_SEED, protocol::BITS_PER_POINT as usize,
+            0, 0, 0, "O",
+        );
+        assert!(
+            matches!(out, LeafEnumOutcome::BudgetExhausted { decodes } if decodes == 5),
+            "expected BudgetExhausted(5), got {out:?}",
+        );
     }
 
     #[test]
@@ -192,7 +232,7 @@ mod tests {
     fn scan_step_is_clamped_to_at_least_one() {
         // scan_step = 0 must not hang/panic; it is clamped to 1.
         let out = enumerate_leaf_areas(
-            -2.5, -2.0, 4.0 / 16.0, 16, 16, 0, 10_000,
+            -2.5, -2.0, 4.0 / 16.0, 16, 16, 0, 10_000, 0,
             protocol::encode_area(), &protocol::encode_params(),
             protocol::ENCODE_RNG_SEED, SHALLOW_BITS, 0, 0, 0, "O",
         );

@@ -990,6 +990,8 @@ pub extern "C" fn bs_leaf_areas_compute(
     height_px: u32,
     scan_step: u32,
     max_leaves: u32,
+    // Zoom-out guard: max non-excluded decodes before aborting (0 = unbounded).
+    max_decodes: u32,
     // Initial (encode) area
     area_re_min: Fixed,
     area_re_max: Fixed,
@@ -1028,31 +1030,34 @@ pub extern "C" fn bs_leaf_areas_compute(
 
     let outcome = enumerate_leaf_areas(
         origin_re, origin_im, step, width_px, height_px, scan_step,
-        max_leaves as usize, area, &params, rng_seed, num_bits as usize, o, p, q, prefix,
+        max_leaves as usize, max_decodes as usize, area, &params, rng_seed,
+        num_bits as usize, o, p, q, prefix,
     );
     Box::into_raw(Box::new(LeafAreasHandle { outcome }))
 }
 
 /// Result status: `0` = a list of leaf areas is available (query with
 /// [`bs_leaf_areas_count`] / [`bs_leaf_areas_rect`] / [`bs_leaf_areas_path`]);
-/// `1` = more than `max_leaves` distinct leaf areas are present (the UX should
-/// prompt the user to zoom in).
+/// `1` = more than `max_leaves` distinct leaf areas are present; `2` = the
+/// decode budget was hit before finishing (zoom-out).  For both `1` and `2`
+/// the UX should prompt the user to zoom in.
 #[no_mangle]
 pub extern "C" fn bs_leaf_areas_status(handle: *const LeafAreasHandle) -> i32 {
     let h = unsafe { &*handle };
     match h.outcome {
         LeafEnumOutcome::Leaves(_) => 0,
         LeafEnumOutcome::TooMany { .. } => 1,
+        LeafEnumOutcome::BudgetExhausted { .. } => 2,
     }
 }
 
-/// Number of registered leaf areas (0 when the status is "too many").
+/// Number of registered leaf areas (0 unless the status is `0`).
 #[no_mangle]
 pub extern "C" fn bs_leaf_areas_count(handle: *const LeafAreasHandle) -> u32 {
     let h = unsafe { &*handle };
     match &h.outcome {
         LeafEnumOutcome::Leaves(l) => l.len() as u32,
-        LeafEnumOutcome::TooMany { .. } => 0,
+        _ => 0,
     }
 }
 
@@ -1095,7 +1100,7 @@ pub extern "C" fn bs_leaf_areas_path(
             Some(leaf) => leaf.path.as_bytes(),
             None => return 0,
         },
-        LeafEnumOutcome::TooMany { .. } => return 0,
+        _ => return 0,
     };
     if !out_buf.is_null() && buf_len > 0 {
         let copy_len = std::cmp::min(path_bytes.len(), (buf_len - 1) as usize);
