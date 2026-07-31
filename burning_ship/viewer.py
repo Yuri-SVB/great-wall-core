@@ -2,6 +2,15 @@
 """
 Burning Ship fractal viewer with BIP39 seed encoding/decoding.
 
+LEGACY (protocol 0.3.0). This pygame dev viewer still drives the 0.3.0 chain
+(stage-0 text + one point per stage, via protocol.encode_entropy /
+decode_entropy). The canonical protocol is the 0.4.0 orbit
+(protocol.encode_orbit / decode_orbit; see the CLI `encode-orbit` / `decode-orbit`
+and great-wall-docs/great-wall-core/DESIGN.md); the shipped orbit UX is the Dart
+app (great-wall-ux / great-wallet). This viewer is retained as a single-fractal
+development/inspection tool pending its orbit port (roadmap Phase 4); it does not
+implement the orbit (Namtso σ root, s_i boards per deep stage, Shamir K_i).
+
 Controls:
   Mouse wheel / +/-      Zoom in/out at cursor
   Arrow keys / drag      Pan

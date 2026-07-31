@@ -49,30 +49,38 @@ from argon2_pipeline import derive_stage_params
 from encoding import stage_text_bytes
 
 
-# Version of the *chained protocol* (this orchestration layer), independent of
-# the Rust ENGINE_VERSION (the single-fractal encode/decode algorithm, now at
-# 0.2.0 — bumped from 0.1.0 when the island-discovery escape cap was raised to
-# keep deep bisection levels navigable).  This is the token that locks
-# great-wall-core to its
-# authoritative design doc: the design lives only in `great-wall-docs/
-# great-wall-core/DESIGN.md` (the single source of truth) and declares this same
-# version, so the code and the doc are verifiably in sync — bump both together
-# when the protocol's encode/decode behaviour changes.
+# Version of the *protocol* (this orchestration layer), independent of the Rust
+# ENGINE_VERSION (the single-fractal encode/decode algorithm).  This is the token
+# that locks great-wall-core to its authoritative design doc: the design lives in
+# `great-wall-docs/great-wall-core/DESIGN.md` (the single source of truth) and
+# declares this same version, so code and doc stay verifiably in sync — bump both
+# together when the protocol's behaviour changes.
 #
 # Pre-1.0 (semver): the protocol is UNSTABLE and still evolving; anything may
 # change.  Lineage / roadmap:
 #   0.1.0  two-stage / multiple-points-per-stage prototype (retroactive label)
 #   0.2.0  one 32-bit point per stage, canonical first fractal, SHA512 carry-over
-#   0.3.0  stage-0 text + Argon2id carry-over (one point per LATER stage)  <- current
+#   0.3.0  stage-0 text + Argon2id carry-over (one point per LATER stage) — LEGACY
+#   0.4.0  Namtso-rooted orbit; r_i > 2 fractals per deep stage; Shamir Sh_i;
+#          cheap per-stage K_i (encode_orbit / decode_orbit)  <- CANONICAL
 #   1.0.0  first STABLE protocol — comprehensive frozen test vectors are
 #          (re)built then; until then they are intentionally provisional and a
 #          version guard in the test harness flags any mismatch as STALE so a
 #          stale vector can never show a false pass.
-PROTOCOL_VERSION = "0.3.0"
+#
+# The canonical protocol is the 0.4.0 orbit (encode_orbit / decode_orbit). The
+# 0.3.0 chain (encode_entropy / decode_entropy + the Argon2id transcript export)
+# is retained as LEGACY, still driving the pygame dev viewer (viewer.py) until it
+# is ported to the orbit; the shipped Dart UX is the orbit's real interface.
+PROTOCOL_VERSION = "0.4.0"
+
+# The retained legacy chain's version — stamped by the legacy encode/decode path
+# (and its CLI commands) so 0.3.0 output is never mislabelled as 0.4.0.
+LEGACY_CHAIN_VERSION = "0.3.0"
 
 
 def get_protocol_version():
-    """Return the chained-protocol version string (see PROTOCOL_VERSION)."""
+    """Return the canonical protocol version string (the 0.4.0 orbit)."""
     return PROTOCOL_VERSION
 
 
@@ -140,7 +148,9 @@ def stage_params(index, stage0_text, prior_bits, profile, iterations,
 
 def encode_entropy(entropy_bits, stage0_text, profile, iterations,
                    progress_cb=None, stop_check=None):
-    """Encode entropy bits into one chained point per (later) stage.
+    """LEGACY (protocol 0.3.0 chain). Encode entropy bits into one chained point
+    per (later) stage. The canonical path is :func:`encode_orbit` (0.4.0);
+    this is retained for the pygame dev viewer pending its orbit port.
 
     ``len(entropy_bits)`` must be a multiple of ``BITS_PER_POINT``.  ``stage0_text``
     is the mandatory stage-0 text input that seeds the chain (normalized to
@@ -468,7 +478,8 @@ __all__ = [
     "StageResult", "stage_params", "encode_entropy", "decode_entropy",
     "build_export_transcript", "export_master_secret",
     "export_master_secret_from_stages", "master_secret_display",
-    "n_stages_for", "PROTOCOL_VERSION", "get_protocol_version",
-    # Orbit protocol (0.4.0) — additive, non-default path.
+    "n_stages_for", "PROTOCOL_VERSION", "LEGACY_CHAIN_VERSION",
+    "get_protocol_version",
+    # Orbit protocol (0.4.0) — the canonical path.
     "OrbitStage", "encode_orbit", "decode_orbit", "ORBIT_PROTOCOL_VERSION",
 ]
