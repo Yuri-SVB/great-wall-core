@@ -1,5 +1,12 @@
 # Great Wall Reference Implementation
 
+> ⚠️ **PROOF OF CONCEPT — NOT SAFE FOR USE.** The current Great Wall
+> implementation is a **substandard proof of concept**: it does not yet match the
+> finalized protocol specification and has not undergone independent security
+> review. **Do not use it to protect real Bitcoin, funds, or any secret of
+> value.** This notice will be removed once the implementation is brought up to
+> the specified protocol.
+
 Bijective mapping between BIP39 mnemonic seeds and Burning Ship fractal
 locations, with an Argon2-based chained pipeline: a mandatory text-only
 **stage 0** seeds the chain, then one 32-bit point per later stage, each stage
