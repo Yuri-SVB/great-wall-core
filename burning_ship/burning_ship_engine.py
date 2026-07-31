@@ -232,6 +232,53 @@ _lib.bs_argon2id_master.argtypes = [
 ]
 _lib.bs_argon2id_master.restype = None
 
+# ---------------------------------------------------------------------------
+# Orbit protocol (0.4.0) primitives — engine-authoritative (src/orbit.rs,
+# src/shamir.rs).  H = SHA-256 (cheap), H* = Argon2d.  These are additive: they
+# do NOT touch the 0.3.0 encode/decode pipeline (protocol.py is flipped to drive
+# through them in a later step — core-orbit-redesign-plan.md §5).
+# ---------------------------------------------------------------------------
+_lib.bs_orbit_root.argtypes = [
+    ctypes.POINTER(ctypes.c_uint8),  # sigma_ptr (variable length)
+    ctypes.c_uint32,                  # sigma_len
+    ctypes.POINTER(ctypes.c_uint8),  # out_digest (32 bytes)
+]
+_lib.bs_orbit_root.restype = None
+
+_lib.bs_theta.argtypes = [
+    ctypes.POINTER(ctypes.c_uint8),  # o_ptr (32 bytes)
+    ctypes.c_uint32,                  # j (board index)
+    ctypes.POINTER(ctypes.c_uint8),  # out_digest (32 bytes)
+]
+_lib.bs_theta.restype = None
+
+_lib.bs_master_secret.argtypes = [
+    ctypes.POINTER(ctypes.c_uint8),  # o_ptr (32 bytes)
+    ctypes.POINTER(ctypes.c_uint8),  # sh_ptr (variable length)
+    ctypes.c_uint32,                  # sh_len
+    ctypes.POINTER(ctypes.c_uint8),  # out_digest (32 bytes)
+]
+_lib.bs_master_secret.restype = None
+
+_lib.bs_orbit_advance.argtypes = [
+    ctypes.POINTER(ctypes.c_uint8),  # o_ptr (32 bytes)
+    ctypes.POINTER(ctypes.c_uint8),  # sh_ptr (variable length)
+    ctypes.c_uint32,                  # sh_len
+    ctypes.c_uint32,                  # steps (D derivation passes)
+    ctypes.c_uint8,                   # profile (0=Basic, 1=Advanced, 2=Great Wall)
+    ctypes.POINTER(ctypes.c_uint8),  # out_k (32 bytes: K_i)
+    ctypes.POINTER(ctypes.c_uint8),  # out_next (32 bytes: o_{i+1})
+]
+_lib.bs_orbit_advance.restype = None
+
+_lib.bs_shamir_interp.argtypes = [
+    ctypes.POINTER(ctypes.c_uint32),  # xs_ptr (t u32 abscissae)
+    ctypes.POINTER(ctypes.c_uint32),  # ys_ptr (t u32 points)
+    ctypes.c_uint32,                   # t (threshold / number of points)
+    ctypes.POINTER(ctypes.c_uint32),  # out_sh (t u32 coefficients)
+]
+_lib.bs_shamir_interp.restype = None
+
 
 
 # ---------------------------------------------------------------------------
@@ -762,3 +809,85 @@ def render_viewport_generic(origin_re, origin_im, step, width, height, p, max_it
         pixels.ctypes.data_as(ctypes.POINTER(ctypes.c_uint8)),
     )
     return pixels.reshape(height, width)
+
+
+# ---------------------------------------------------------------------------
+# Orbit protocol (0.4.0) wrappers — see src/orbit.rs, src/shamir.rs and
+# great-wall-docs/great-wall-core/DESIGN.md (Orbit Protocol).  H = SHA-256.
+# ---------------------------------------------------------------------------
+ORBIT_POINT_BYTES = 32
+
+
+def orbit_root(sigma):
+    """o_0 = H(sigma) — orbit root from the (Namtso) salt.  Returns 32 bytes."""
+    n = len(sigma)
+    inp = (ctypes.c_uint8 * n)(*sigma)
+    out = (ctypes.c_uint8 * ORBIT_POINT_BYTES)()
+    _lib.bs_orbit_root(inp, n, out)
+    return bytes(out)
+
+
+def theta(o_i, j):
+    """theta_i_j = H(o_i || j) — 32-byte fractal-parameter digest for board j.
+
+    The (o, p, q) byte-attribution over this digest is applied downstream,
+    unchanged (DESIGN.md, Per-Fractal Parameter Derivation).
+    """
+    assert len(o_i) == ORBIT_POINT_BYTES, "o_i must be 32 bytes"
+    o = (ctypes.c_uint8 * ORBIT_POINT_BYTES)(*o_i)
+    out = (ctypes.c_uint8 * ORBIT_POINT_BYTES)()
+    _lib.bs_theta(o, j, out)
+    return bytes(out)
+
+
+def master_secret(o_i, sh):
+    """K_i = H(o_i || Sh_i) — per-stage master secret (i > 0); cheap H.
+
+    `sh` is the serialized Shamir polynomial (see sh_to_bytes).  Returns 32 bytes.
+    """
+    assert len(o_i) == ORBIT_POINT_BYTES, "o_i must be 32 bytes"
+    o = (ctypes.c_uint8 * ORBIT_POINT_BYTES)(*o_i)
+    m = len(sh)
+    shp = (ctypes.c_uint8 * m)(*sh)
+    out = (ctypes.c_uint8 * ORBIT_POINT_BYTES)()
+    _lib.bs_master_secret(o, shp, m, out)
+    return bytes(out)
+
+
+def orbit_advance(o_i, sh, steps, profile=PROFILE_BASIC):
+    """One orbit step -> (K_i, o_next), with o_next = H*(K_i) over `steps` (D)
+    Argon2d passes.  K_i and the raw {o_i, Sh_i} copies are handled per
+    orbit_step (inputs zeroized before the memory-hard step).
+
+    WARNING: runs real Argon2d at the profile's memory (>= 1 GiB) — heavy.
+    """
+    assert len(o_i) == ORBIT_POINT_BYTES, "o_i must be 32 bytes"
+    o = (ctypes.c_uint8 * ORBIT_POINT_BYTES)(*o_i)
+    m = len(sh)
+    shp = (ctypes.c_uint8 * m)(*sh)
+    out_k = (ctypes.c_uint8 * ORBIT_POINT_BYTES)()
+    out_next = (ctypes.c_uint8 * ORBIT_POINT_BYTES)()
+    _lib.bs_orbit_advance(o, shp, m, steps, profile, out_k, out_next)
+    return bytes(out_k), bytes(out_next)
+
+
+def shamir_interp(xs, ys):
+    """Interpolate the full Shamir polynomial Sh over GF(2^32) from t (x, y)
+    points; returns t coefficients (ascending powers).  Sh is t*32 bits — the
+    whole polynomial, NOT the constant term f(0)."""
+    t = len(xs)
+    assert t == len(ys), "xs and ys must have equal length"
+    xa = (ctypes.c_uint32 * t)(*xs)
+    ya = (ctypes.c_uint32 * t)(*ys)
+    out = (ctypes.c_uint32 * t)()
+    _lib.bs_shamir_interp(xa, ya, t, out)
+    return list(out)
+
+
+def sh_to_bytes(coeffs):
+    """Serialize Sh coefficients (u32 list) to big-endian bytes — the wire form
+    matching shamir::sh_to_bytes, fed to master_secret / orbit_advance."""
+    out = bytearray()
+    for c in coeffs:
+        out += int(c).to_bytes(4, "big")
+    return bytes(out)
