@@ -29,6 +29,7 @@ pub mod bisect;
 pub mod leaf_enum;
 pub mod render_cache;
 pub mod argon2_hash;
+pub mod shamir;
 pub mod text;
 pub mod protocol;
 pub mod ffi;
