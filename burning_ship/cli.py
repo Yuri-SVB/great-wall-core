@@ -36,6 +36,7 @@ from burning_ship_engine import (
     PROFILE_BASIC, PROFILE_ADVANCED, PROFILE_GREAT_WALL,
     ARGON2_DIGEST_BYTES, argon2_single,
     fixed_to_f64,
+    setup_tier_thresholds, setup_tier_substandard,
 )
 from bip39 import mnemonic_to_bits, bits_to_mnemonic
 from constants import (
@@ -44,8 +45,9 @@ from constants import (
 )
 from encoding import bits_to_bytes, bits_to_hex, stage_text_bytes, normalize_stage_text
 from protocol import (
-    encode_entropy, PROTOCOL_VERSION,
+    encode_entropy, PROTOCOL_VERSION, LEGACY_CHAIN_VERSION,
     export_master_secret, master_secret_display, _midpoint as _proto_midpoint,
+    encode_orbit, decode_orbit,
 )
 
 # ---------------------------------------------------------------------------
@@ -221,7 +223,7 @@ def cmd_encode(args):
 
     doc = {
         "version": get_engine_version(),
-        "protocol_version": PROTOCOL_VERSION,
+        "protocol_version": LEGACY_CHAIN_VERSION,  # 0.3.0 legacy chain
         "input": {
             "entropy_hex": bits_to_hex(entropy_bits),
             "entropy_bits": total_entropy,
@@ -355,6 +357,115 @@ def cmd_master(args):
 
 
 # ---------------------------------------------------------------------------
+# Orbit commands (protocol 0.4.0 — the canonical path)
+# ---------------------------------------------------------------------------
+
+def _split_orbit_entropy(entropy_bits, thresholds):
+    """Split a flat bit list into per-stage per-fractal 32-bit chunks."""
+    need = sum(thresholds) * BITS_PER_POINT
+    if len(entropy_bits) != need:
+        print(f"Error: setup needs {sum(thresholds)} points = {need} entropy bits "
+              f"(thresholds {thresholds}), got {len(entropy_bits)}", file=sys.stderr)
+        sys.exit(1)
+    stage_chunks, idx = [], 0
+    for t in thresholds:
+        stage = []
+        for _ in range(t):
+            stage.append(entropy_bits[idx:idx + BITS_PER_POINT])
+            idx += BITS_PER_POINT
+        stage_chunks.append(stage)
+    return stage_chunks
+
+
+def cmd_encode_orbit(args):
+    """Encode entropy onto the 0.4.0 orbit for a setup level (JSON out).
+
+    The orbit advance is memory-hard (Argon2d per stage boundary), so this is
+    intentionally slow — one advance per stage transition at the chosen profile.
+    """
+    sigma = bytes.fromhex(args.sigma_hex)
+    thresholds = setup_tier_thresholds(args.setup)
+    if not thresholds:
+        print(f"Error: invalid setup level {args.setup}", file=sys.stderr)
+        sys.exit(1)
+    entropy_bits = _entropy_from_hex(args.entropy)
+    stage_chunks = _split_orbit_entropy(entropy_bits, thresholds)
+
+    profile_id = PROFILE_MAP.get(args.profile)
+    if profile_id is None:
+        print(f"Error: unknown profile '{args.profile}' (use b/a/g)", file=sys.stderr)
+        sys.exit(1)
+
+    stages, k = encode_orbit(sigma, args.setup, stage_chunks,
+                             iterations=args.iterations, profile=profile_id)
+
+    stage_docs = []
+    for st in stages:
+        stage_docs.append({
+            "index": st.index,
+            "threshold": st.threshold,
+            "o_hex": st.o_bytes.hex(),
+            "fractals": [{"o": _hex_fixed(o), "p": _hex_fixed(p), "q": _hex_fixed(q)}
+                         for (o, p, q) in st.fractals],
+            "points": [{"re_raw": _hex_fixed(re), "im_raw": _hex_fixed(im)}
+                       for (re, im) in st.points],
+            "sh": [format(c, "08x") for c in st.sh],
+            "k_hex": st.k.hex(),
+        })
+
+    doc = {
+        "version": get_engine_version(),
+        "protocol_version": PROTOCOL_VERSION,  # 0.4.0 orbit
+        "input": {
+            "sigma_hex": args.sigma_hex,
+            "setup_level": args.setup,
+            "substandard": bool(setup_tier_substandard(args.setup)),
+            "thresholds": thresholds,
+            "entropy_hex": bits_to_hex(entropy_bits),
+            "argon2_profile": args.profile,
+            "argon2_iterations": args.iterations,
+        },
+        "stages": stage_docs,
+        "master_secret": {"k_hex": k.hex()},   # terminal K_N (cheap H)
+    }
+    json.dump(doc, sys.stdout, indent=2)
+    print()
+
+
+def cmd_decode_orbit(args):
+    """Decode a 0.4.0 orbit document → recovered entropy + terminal K."""
+    with open(args.input, "r") as f:
+        doc = json.load(f)
+    inp = doc["input"]
+    sigma = bytes.fromhex(inp["sigma_hex"])
+    setup_level = inp["setup_level"]
+    profile_id = PROFILE_MAP.get(inp.get("argon2_profile", "b"), PROFILE_BASIC)
+    iterations = int(inp.get("argon2_iterations", 1))
+
+    stage_points = []
+    for st in sorted(doc["stages"], key=lambda s: s["index"]):
+        stage_points.append([
+            (_parse_hex_i64(p["re_raw"]), _parse_hex_i64(p["im_raw"]))
+            for p in st["points"]
+        ])
+
+    recovered, k = decode_orbit(sigma, stage_points, setup_level,
+                                iterations=iterations, profile=profile_id)
+    all_bits = [b for stage in recovered for chunk in stage for b in chunk]
+
+    result = {
+        "version": doc.get("version", "unknown"),
+        "protocol_version": doc.get("protocol_version", PROTOCOL_VERSION),
+        "setup_level": setup_level,
+        "decoded_entropy_hex": bits_to_hex(all_bits),
+        "decoded_entropy_bits": len(all_bits),
+        "master_secret": {"k_hex": k.hex()},
+    }
+    json.dump(result, sys.stdout, indent=2)
+    print()
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -402,6 +513,30 @@ def main():
     mst.add_argument("--export-stage", type=int, default=None,
                      help="Point stage (1..N) to export at (default: last).")
 
+    # encode-orbit (protocol 0.4.0 — canonical)
+    enco = sub.add_parser("encode-orbit",
+                          help="Encode entropy onto the 0.4.0 orbit (JSON)")
+    enco.add_argument("--sigma-hex", type=str, required=True,
+                      help="Namtso salt sigma, hex (pre-harvested; e.g. from the "
+                           "namtso CLI). The orbit root is o_0 = H(sigma).")
+    enco.add_argument("--setup", type=int, required=True,
+                      help="Setup level: 1 = entry (r_1=2, SUBSTANDARD, 64-bit); "
+                           "2 = standard (r=3, 96-bit); 3+ add deep stages.")
+    enco.add_argument("--entropy", type=str, required=True,
+                      help="Hex entropy; must supply sum(thresholds)*32 bits "
+                           "(one 32-bit value per fractal across all stages).")
+    enco.add_argument("--profile", type=str, default="b",
+                      help="Argon2 profile for the memory-hard orbit advance "
+                           "(b=basic, a=advanced, g=great_wall).")
+    enco.add_argument("--iterations", type=int, default=1,
+                      help="H* derivation steps per orbit advance (default 1).")
+
+    # decode-orbit
+    deco = sub.add_parser("decode-orbit",
+                          help="Decode a 0.4.0 orbit document JSON → entropy + K")
+    deco.add_argument("--input", type=str, required=True,
+                      help="Path to encode-orbit output JSON")
+
     args = parser.parse_args()
     if args.command == "encode":
         cmd_encode(args)
@@ -409,6 +544,10 @@ def main():
         cmd_decode(args)
     elif args.command == "master":
         cmd_master(args)
+    elif args.command == "encode-orbit":
+        cmd_encode_orbit(args)
+    elif args.command == "decode-orbit":
+        cmd_decode_orbit(args)
     else:
         parser.print_help()
         sys.exit(1)

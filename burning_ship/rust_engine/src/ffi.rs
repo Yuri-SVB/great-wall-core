@@ -1262,3 +1262,123 @@ pub extern "C" fn bs_canonical_island_free(handle: *mut CanonicalIslandHandle) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Orbit protocol (0.4.0) — engine-authoritative primitives.
+//
+// These expose the orbit derivation (crate::orbit) and the GF(2^32) share
+// layer (crate::shamir) over the C ABI so callers read the protocol from the
+// engine rather than re-implementing it.  They do not touch the 0.3.0
+// encode/decode pipeline; protocol.py is flipped to drive through them in a
+// later step (see great-wall-docs/next-steps/core-orbit-redesign-plan.md §5).
+// ---------------------------------------------------------------------------
+
+/// `o_0 = H(σ)` — orbit root from the public Namtso salt. Writes 32 bytes.
+#[no_mangle]
+pub extern "C" fn bs_orbit_root(sigma_ptr: *const u8, sigma_len: u32, out_digest: *mut u8) {
+    let sigma = unsafe { slice::from_raw_parts(sigma_ptr, sigma_len as usize) };
+    let digest = crate::orbit::orbit_root(sigma);
+    unsafe { slice::from_raw_parts_mut(out_digest, 32).copy_from_slice(&digest) };
+}
+
+/// `theta_i_j = H(o_i ‖ j)` — parameter digest of board `j` at orbit point `o_i`
+/// (`o_ptr` = 32 bytes). Writes the 32-byte digest; `(o,p,q)` attribution is
+/// applied downstream, unchanged.
+#[no_mangle]
+pub extern "C" fn bs_theta(o_ptr: *const u8, j: u32, out_digest: *mut u8) {
+    let mut o = [0u8; 32];
+    o.copy_from_slice(unsafe { slice::from_raw_parts(o_ptr, 32) });
+    let digest = crate::orbit::theta_digest(&o, j);
+    unsafe { slice::from_raw_parts_mut(out_digest, 32).copy_from_slice(&digest) };
+}
+
+/// `K_i = H(o_i ‖ Sh_i)` — per-stage master secret (`i > 0`), the cheap-`H`
+/// commitment. `o_ptr` = 32 bytes; `sh_ptr`/`sh_len` = serialized Shamir
+/// polynomial. Writes 32 bytes.
+#[no_mangle]
+pub extern "C" fn bs_master_secret(
+    o_ptr: *const u8,
+    sh_ptr: *const u8,
+    sh_len: u32,
+    out_digest: *mut u8,
+) {
+    let mut o = [0u8; 32];
+    o.copy_from_slice(unsafe { slice::from_raw_parts(o_ptr, 32) });
+    let sh = unsafe { slice::from_raw_parts(sh_ptr, sh_len as usize) };
+    let digest = crate::orbit::master_secret(&o, sh);
+    unsafe { slice::from_raw_parts_mut(out_digest, 32).copy_from_slice(&digest) };
+}
+
+/// One orbit step: writes `K_i = H(o_i ‖ Sh_i)` to `out_k` (32 bytes) and
+/// `o_{i+1} = H*(K_i)` (Argon2d `profile`, `steps` passes) to `out_next` (32
+/// bytes). The raw `{o_i, Sh_i}` copies are zeroized before the memory-hard
+/// step (crate::orbit::orbit_step). `profile`: 0=Basic, 1=Advanced, 2=Great Wall.
+#[no_mangle]
+pub extern "C" fn bs_orbit_advance(
+    o_ptr: *const u8,
+    sh_ptr: *const u8,
+    sh_len: u32,
+    steps: u32,
+    profile: u8,
+    out_k: *mut u8,
+    out_next: *mut u8,
+) {
+    use zeroize::Zeroizing;
+    let mut o = Zeroizing::new([0u8; 32]);
+    o.copy_from_slice(unsafe { slice::from_raw_parts(o_ptr, 32) });
+    let sh = Zeroizing::new(unsafe { slice::from_raw_parts(sh_ptr, sh_len as usize) }.to_vec());
+    let (k_i, o_next) = crate::orbit::orbit_step(o, sh, steps, profile);
+    unsafe {
+        slice::from_raw_parts_mut(out_k, 32).copy_from_slice(&k_i);
+        slice::from_raw_parts_mut(out_next, 32).copy_from_slice(&o_next);
+    }
+}
+
+/// Interpolate the full Shamir polynomial `Sh` from `t` points over GF(2^32):
+/// `xs`/`ys` are `t` `u32` abscissae/points; writes `t` `u32` coefficients
+/// (ascending powers) to `out_sh`. `Sh` is `t·32` bits — NOT the constant term.
+#[no_mangle]
+pub extern "C" fn bs_shamir_interp(
+    xs_ptr: *const u32,
+    ys_ptr: *const u32,
+    t: u32,
+    out_sh: *mut u32,
+) {
+    let n = t as usize;
+    let xs = unsafe { slice::from_raw_parts(xs_ptr, n) };
+    let ys = unsafe { slice::from_raw_parts(ys_ptr, n) };
+    let sh = crate::shamir::interpolate(xs, ys);
+    unsafe { slice::from_raw_parts_mut(out_sh, n).copy_from_slice(&sh) };
+}
+
+/// Canonical per-stage Shamir thresholds `t_i` for a setup `level` (1-based):
+/// index 0 is stage 0, `1..=N` the deep stages (`t_i == r_i`, `t_i·32` bits).
+///
+/// Query-then-fill (like `bs_salt_pepper_canonicalize`): pass `out = null` /
+/// `cap = 0` to learn the count `N+1`, then call again with a `u32` buffer of
+/// that size. Always returns the full count. Returns 0 for an invalid `level`
+/// (`0` or `> MAX_SETUP_LEVEL`) so the ABI never panics.
+#[no_mangle]
+pub extern "C" fn bs_setup_tier_thresholds(level: u32, out: *mut u32, cap: u32) -> u32 {
+    if level == 0 || level > crate::setup_tiers::MAX_SETUP_LEVEL {
+        return 0;
+    }
+    let t = crate::setup_tiers::thresholds(level);
+    if !out.is_null() && cap > 0 {
+        let n = t.len().min(cap as usize);
+        let o = unsafe { slice::from_raw_parts_mut(out, cap as usize) };
+        o[..n].copy_from_slice(&t[..n]);
+    }
+    t.len() as u32
+}
+
+/// Whether a setup `level` is **substandard** (the entry tier, Setup 1, with a
+/// 64-bit deep stage). Returns 1 if substandard, else 0 (0 also for an invalid
+/// `level`). Interfaces MUST surface this loudly wherever Setup 1 is offered.
+#[no_mangle]
+pub extern "C" fn bs_setup_tier_substandard(level: u32) -> u8 {
+    if level == 0 || level > crate::setup_tiers::MAX_SETUP_LEVEL {
+        return 0;
+    }
+    crate::setup_tiers::is_substandard(level) as u8
+}
+

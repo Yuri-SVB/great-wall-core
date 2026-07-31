@@ -34,7 +34,12 @@ GUI both drive their encode/decode through it.
 
 import struct
 
-from burning_ship_engine import encode, decode_full, argon2id_master
+from burning_ship_engine import (
+    encode, decode_full, argon2id_master,
+    orbit_root, theta, master_secret, orbit_advance,
+    shamir_interp, sh_to_bytes, setup_tier_thresholds, setup_tier_substandard,
+    PROFILE_BASIC,
+)
 from constants import (
     BITS_PER_POINT, ENCODE_AREA, GUI_PARAMS,
     ARGON2ID_MASTER_OUTPUT_BYTES, MASTER_DISPLAY_CHARS,
@@ -44,30 +49,38 @@ from argon2_pipeline import derive_stage_params
 from encoding import stage_text_bytes
 
 
-# Version of the *chained protocol* (this orchestration layer), independent of
-# the Rust ENGINE_VERSION (the single-fractal encode/decode algorithm, now at
-# 0.2.0 — bumped from 0.1.0 when the island-discovery escape cap was raised to
-# keep deep bisection levels navigable).  This is the token that locks
-# great-wall-core to its
-# authoritative design doc: the design lives only in `great-wall-docs/
-# great-wall-core/DESIGN.md` (the single source of truth) and declares this same
-# version, so the code and the doc are verifiably in sync — bump both together
-# when the protocol's encode/decode behaviour changes.
+# Version of the *protocol* (this orchestration layer), independent of the Rust
+# ENGINE_VERSION (the single-fractal encode/decode algorithm).  This is the token
+# that locks great-wall-core to its authoritative design doc: the design lives in
+# `great-wall-docs/great-wall-core/DESIGN.md` (the single source of truth) and
+# declares this same version, so code and doc stay verifiably in sync — bump both
+# together when the protocol's behaviour changes.
 #
 # Pre-1.0 (semver): the protocol is UNSTABLE and still evolving; anything may
 # change.  Lineage / roadmap:
 #   0.1.0  two-stage / multiple-points-per-stage prototype (retroactive label)
 #   0.2.0  one 32-bit point per stage, canonical first fractal, SHA512 carry-over
-#   0.3.0  stage-0 text + Argon2id carry-over (one point per LATER stage)  <- current
+#   0.3.0  stage-0 text + Argon2id carry-over (one point per LATER stage) — LEGACY
+#   0.4.0  Namtso-rooted orbit; r_i > 2 fractals per deep stage; Shamir Sh_i;
+#          cheap per-stage K_i (encode_orbit / decode_orbit)  <- CANONICAL
 #   1.0.0  first STABLE protocol — comprehensive frozen test vectors are
 #          (re)built then; until then they are intentionally provisional and a
 #          version guard in the test harness flags any mismatch as STALE so a
 #          stale vector can never show a false pass.
-PROTOCOL_VERSION = "0.3.0"
+#
+# The canonical protocol is the 0.4.0 orbit (encode_orbit / decode_orbit). The
+# 0.3.0 chain (encode_entropy / decode_entropy + the Argon2id transcript export)
+# is retained as LEGACY, still driving the pygame dev viewer (viewer.py) until it
+# is ported to the orbit; the shipped Dart UX is the orbit's real interface.
+PROTOCOL_VERSION = "0.4.0"
+
+# The retained legacy chain's version — stamped by the legacy encode/decode path
+# (and its CLI commands) so 0.3.0 output is never mislabelled as 0.4.0.
+LEGACY_CHAIN_VERSION = "0.3.0"
 
 
 def get_protocol_version():
-    """Return the chained-protocol version string (see PROTOCOL_VERSION)."""
+    """Return the canonical protocol version string (the 0.4.0 orbit)."""
     return PROTOCOL_VERSION
 
 
@@ -135,7 +148,9 @@ def stage_params(index, stage0_text, prior_bits, profile, iterations,
 
 def encode_entropy(entropy_bits, stage0_text, profile, iterations,
                    progress_cb=None, stop_check=None):
-    """Encode entropy bits into one chained point per (later) stage.
+    """LEGACY (protocol 0.3.0 chain). Encode entropy bits into one chained point
+    per (later) stage. The canonical path is :func:`encode_orbit` (0.4.0);
+    this is retained for the pygame dev viewer pending its orbit port.
 
     ``len(entropy_bits)`` must be a multiple of ``BITS_PER_POINT``.  ``stage0_text``
     is the mandatory stage-0 text input that seeds the chain (normalized to
@@ -186,6 +201,184 @@ def decode_entropy(points_raw, stage0_text, profile, iterations,
         out_bits.extend(bits)
         prior_bits = prior_bits + bits
     return out_bits
+
+
+# ---------------------------------------------------------------------------
+# Orbit protocol (0.4.0) — ADDITIVE, NON-DEFAULT path.
+#
+# This is the staged landing of the orbit redesign (core-orbit-redesign-plan.md
+# §5 step 6). It drives encode/decode through the orbit primitives
+# (burning_ship_engine.orbit_* + shamir_interp), REUSING the per-board bisection
+# encoder (`encode` / `decode_full`) unchanged. It does NOT replace the 0.3.0
+# chain above and does NOT bump PROTOCOL_VERSION — the flip (retire 0.3.0, bump
+# the version, rewire the CLI/GUI) is a separate deliberate step.
+#
+#   o_0        = H(σ)                         (Namtso salt σ; orbit_root)
+#   θ_i_j      = H(o_i ‖ j) → (o, p, q)       (theta digest, byte-attributed)
+#   p_i_j      = encode(chunk_i_j on θ_i_j)   (one 32-bit point per fractal)
+#   Sh_i       = shamir_interp(points)        (full polynomial, t_i·32 bits)
+#   K_i        = H(o_i ‖ Sh_i)                (per-stage master secret, i>0)
+#   o_{i+1}    = H*(K_i)                       (advance_fn; default = Argon2d)
+#
+# `setup_level` fixes the per-stage thresholds t_i via the engine's canonical
+# tier table (index 0 = stage 0, 1..N = deep stages). `advance_fn(o_bytes,
+# sh_bytes) -> o_next` is injectable so the orbit orchestration is testable with
+# a cheap deterministic advance; the default is the memory-hard engine advance.
+# ---------------------------------------------------------------------------
+
+ORBIT_PROTOCOL_VERSION = "0.4.0"  # target version; not yet the shipped PROTOCOL_VERSION
+
+
+def _orbit_params(o_i, j):
+    """θ_i_j = H(o_i ‖ j) → raw (o, p, q) uint64 via the standard byte
+    attribution (`bs_theta` gives the 32-byte digest; the o/p/q split — first
+    three big-endian uint64s — is unchanged from the prototype)."""
+    h = theta(o_i, j)
+    return (int.from_bytes(h[0:8], "big"),
+            int.from_bytes(h[8:16], "big"),
+            int.from_bytes(h[16:24], "big"))
+
+
+def _bits_to_u32(bits):
+    """Pack a BITS_PER_POINT-bit list (MSB first, matching encoding.bits_to_bytes)
+    into the u32 Shamir point value."""
+    y = 0
+    for b in bits:
+        y = ((y << 1) | (b & 1)) & 0xFFFFFFFF
+    return y
+
+
+def _argon2_advance(o_bytes, sh_bytes, iterations, profile):
+    """Default orbit advance: o_{i+1} = H*(K_i) via the memory-hard engine call."""
+    _k_i, o_next = orbit_advance(o_bytes, sh_bytes, iterations, profile)
+    return o_next
+
+
+class OrbitStage:
+    """One stage of an orbit encode: its orbit point, per-fractal params + points,
+    Shamir polynomial, and per-stage master secret K_i.
+
+    Attributes:
+        index:     stage index (0 = stage 0, 1..N = deep stages).
+        o_bytes:   the 32-byte orbit point o_i for this stage.
+        threshold: t_i (= r_i), the number of fractals/points.
+        fractals:  list of (o, p, q) raw params, one per fractal.
+        points:    list of (re_raw, im_raw) encoded points, one per fractal.
+        sh:        the full Shamir polynomial Sh_i (list of t_i u32 coeffs).
+        k:         K_i = H(o_i ‖ Sh_i) (bytes). Only a true master secret for i>0.
+    """
+
+    def __init__(self, index, o_bytes, threshold, fractals, points, sh, k):
+        self.index = index
+        self.o_bytes = o_bytes
+        self.threshold = threshold
+        self.fractals = fractals
+        self.points = points
+        self.sh = sh
+        self.k = k
+
+
+def encode_orbit(sigma, setup_level, stage_chunks, iterations=1,
+                 profile=PROFILE_BASIC, advance_fn=None, params=None, area=None):
+    """Encode entropy onto the orbit's fractals for a given `setup_level`.
+
+    ``stage_chunks[i]`` is a list of ``t_i`` bit-lists (each ``BITS_PER_POINT``
+    long) — one 32-bit value per fractal of stage ``i``. ``t_i`` comes from the
+    engine's canonical tier table. Returns ``(stages, K)`` where ``stages`` is a
+    list of :class:`OrbitStage` and ``K`` is the terminal ``K_N``.
+
+    ``advance_fn(o_bytes, sh_bytes) -> o_next`` overrides the default memory-hard
+    advance (used by tests to inject a cheap deterministic advance). ``params`` /
+    ``area`` default to the shipped ``GUI_PARAMS`` / ``ENCODE_AREA``; tests pass
+    lighter discovery params for speed (encode and decode must use the same).
+    """
+    if params is None:
+        params = GUI_PARAMS
+    if area is None:
+        area = ENCODE_AREA
+    thresholds = setup_tier_thresholds(setup_level)
+    if not thresholds:
+        raise ValueError(f"invalid setup level {setup_level!r}")
+    if len(stage_chunks) != len(thresholds):
+        raise ValueError(
+            f"expected {len(thresholds)} stages for setup {setup_level}, "
+            f"got {len(stage_chunks)}")
+    advance = advance_fn or (lambda o_b, sh_b: _argon2_advance(o_b, sh_b, iterations, profile))
+
+    o = orbit_root(sigma)
+    stages = []
+    k = None
+    for i, t_i in enumerate(thresholds):
+        chunks = stage_chunks[i]
+        if len(chunks) != t_i:
+            raise ValueError(f"stage {i}: expected {t_i} points, got {len(chunks)}")
+        fractals, points, xs, ys = [], [], [], []
+        for j in range(t_i):
+            chunk = chunks[j]
+            if len(chunk) != BITS_PER_POINT:
+                raise ValueError(
+                    f"stage {i} fractal {j}: expected {BITS_PER_POINT} bits, "
+                    f"got {len(chunk)}")
+            op, pp, qp = _orbit_params(o, j)
+            res = encode(chunk, area=area, params=params,
+                         o=op, p=pp, q=qp, path_prefix="O")
+            fractals.append((op, pp, qp))
+            points.append((res.point_re_raw, res.point_im_raw))
+            xs.append(j + 1)                 # primary abscissa (positive)
+            ys.append(_bits_to_u32(chunk))
+        sh = shamir_interp(xs, ys)
+        k = master_secret(o, sh_to_bytes(sh))
+        stages.append(OrbitStage(i, o, t_i, fractals, points, sh, k))
+        o = advance(o, sh_to_bytes(sh))
+    return stages, k
+
+
+def decode_orbit(sigma, stage_points, setup_level, iterations=1,
+                 profile=PROFILE_BASIC, advance_fn=None, params=None, area=None):
+    """Inverse of :func:`encode_orbit`.
+
+    ``stage_points[i]`` is a list of ``t_i`` ``(re_raw, im_raw)`` i64 pairs (the
+    points placed/clicked on stage ``i``'s fractals). Returns
+    ``(stage_chunks, K)`` — the recovered per-fractal bit-lists and the terminal
+    ``K_N``. ``advance_fn`` / ``params`` / ``area`` must match the ones used to
+    encode.
+    """
+    if params is None:
+        params = GUI_PARAMS
+    if area is None:
+        area = ENCODE_AREA
+    thresholds = setup_tier_thresholds(setup_level)
+    if not thresholds:
+        raise ValueError(f"invalid setup level {setup_level!r}")
+    if len(stage_points) != len(thresholds):
+        raise ValueError(
+            f"expected {len(thresholds)} stages for setup {setup_level}, "
+            f"got {len(stage_points)}")
+    advance = advance_fn or (lambda o_b, sh_b: _argon2_advance(o_b, sh_b, iterations, profile))
+
+    o = orbit_root(sigma)
+    out_chunks = []
+    k = None
+    for i, t_i in enumerate(thresholds):
+        pts = stage_points[i]
+        if len(pts) != t_i:
+            raise ValueError(f"stage {i}: expected {t_i} points, got {len(pts)}")
+        chunks, xs, ys = [], [], []
+        for j in range(t_i):
+            re_raw, im_raw = pts[j]
+            op, pp, qp = _orbit_params(o, j)
+            bits, _leaf, _valid, _path = decode_full(
+                re_raw, im_raw, BITS_PER_POINT, area=area, params=params,
+                o=op, p=pp, q=qp, path_prefix="O")
+            bits = list(bits)
+            chunks.append(bits)
+            xs.append(j + 1)
+            ys.append(_bits_to_u32(bits))
+        sh = shamir_interp(xs, ys)
+        k = master_secret(o, sh_to_bytes(sh))
+        out_chunks.append(chunks)
+        o = advance(o, sh_to_bytes(sh))
+    return out_chunks, k
 
 
 # ---------------------------------------------------------------------------
@@ -285,5 +478,8 @@ __all__ = [
     "StageResult", "stage_params", "encode_entropy", "decode_entropy",
     "build_export_transcript", "export_master_secret",
     "export_master_secret_from_stages", "master_secret_display",
-    "n_stages_for", "PROTOCOL_VERSION", "get_protocol_version",
+    "n_stages_for", "PROTOCOL_VERSION", "LEGACY_CHAIN_VERSION",
+    "get_protocol_version",
+    # Orbit protocol (0.4.0) — the canonical path.
+    "OrbitStage", "encode_orbit", "decode_orbit", "ORBIT_PROTOCOL_VERSION",
 ]

@@ -14,3 +14,5 @@ crate-type = ["cdylib"]
 [dependencies]
 rayon = "1.10"
 argon2 = "0.5"
+sha2 = "0.10"
+zeroize = "1.8"
