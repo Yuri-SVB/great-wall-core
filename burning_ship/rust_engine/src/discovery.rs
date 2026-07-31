@@ -25,6 +25,27 @@ const MAX_DEGENERATE_SCORE: u128 = 64 << LOG2_FRAC_BITS;
 /// Exclusion threshold denominator (fraction = num / EXCLUSION_DENOM).
 const EXCLUSION_DENOM: u128 = 256;
 
+/// Deterministic, overflow-safe test of whether the excluded-area fraction has
+/// reached the exclusion threshold — i.e. `excluded / total >= threshold_num /
+/// EXCLUSION_DENOM`.
+///
+/// `total_area` / `excluded_area` are areas in raw I4F60² units (2⁻¹²⁰ per
+/// count), so the full viewport already sits near 2¹²⁴ and the naive
+/// cross-multiplied form (`excluded·DENOM` vs `total·threshold_num`) overflows
+/// u128 once multiplied by the small threshold factors. We only need the *ratio*
+/// to a few bits, so both operands are reduced by one common, deterministic
+/// shift keyed to `total_area`'s magnitude (retaining ~96 significant bits). The
+/// same shift on both sides preserves the ratio, keeps the `≤ 256` multipliers
+/// from overflowing, and is computed identically on encode and decode —
+/// precision (deterministically imprecise) is traded for range. Small rectangles
+/// (`total_area < 2⁹⁶`) get a zero shift and full precision.
+fn exclusion_threshold_reached(excluded_area: u128, total_area: u128, threshold_num: u32) -> bool {
+    let s = total_area.checked_ilog2().unwrap_or(0).saturating_sub(96);
+    let excl = excluded_area >> s;
+    let tot = total_area >> s;
+    excl * EXCLUSION_DENOM >= tot * threshold_num as u128
+}
+
 /// Direction bits for flood-fill collision testing.
 const DIR_LEFT: u8 = 1;
 const DIR_RIGHT: u8 = 2;
@@ -715,7 +736,7 @@ fn discover_islands_impl(
     let mut skip_low_esc: u64 = 0;
 
     while (islands.len() as u32) < params.target_good
-        && excluded_area * EXCLUSION_DENOM < total_area * params.exclusion_threshold_num as u128
+        && !exclusion_threshold_reached(excluded_area, total_area, params.exclusion_threshold_num)
         && attempts < params.max_attempts
     {
         attempts += 1;
@@ -803,7 +824,7 @@ fn discover_islands_impl(
     // Stop-reason diagnosis
     let stop_reason = if (islands.len() as u32) >= params.target_good {
         "target_good"
-    } else if excluded_area * EXCLUSION_DENOM >= total_area * params.exclusion_threshold_num as u128 {
+    } else if exclusion_threshold_reached(excluded_area, total_area, params.exclusion_threshold_num) {
         "exclusion"
     } else {
         "max_attempts"
