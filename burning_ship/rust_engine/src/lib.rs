@@ -31,6 +31,7 @@ pub mod render_cache;
 pub mod argon2_hash;
 pub mod shamir;
 pub mod orbit;
+pub mod setup_tiers;
 pub mod text;
 pub mod protocol;
 pub mod ffi;

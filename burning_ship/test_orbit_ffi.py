@@ -116,12 +116,28 @@ def test_shamir():
               f"t={t}: identical Sh wire bytes across subsets (K_i stable)")
 
 
+def test_setup_tiers():
+    print("setup tiers (canonical per-stage thresholds t_i):")
+    check(eng.setup_tier_thresholds(1) == [2, 2], "Setup 1 -> [2, 2] (entry)")
+    check(eng.setup_tier_thresholds(2) == [2, 3], "Setup 2 -> [2, 3] (standard)")
+    check(eng.setup_tier_thresholds(3) == [2, 3, 3], "Setup 3 -> [2, 3, 3]")
+    check(eng.setup_tier_thresholds(4) == [2, 3, 3, 3], "Setup 4 -> [2, 3, 3, 3]")
+    check(eng.setup_tier_substandard(1) is True, "Setup 1 is substandard")
+    check(all(eng.setup_tier_substandard(k) is False for k in range(2, 10)),
+          "Setup >= 2 is standard")
+    check(eng.setup_tier_thresholds(0) == [], "invalid level 0 -> []")
+    for k in range(2, 10):
+        deep = eng.setup_tier_thresholds(k)[1:]
+        check(all(t > 2 for t in deep), f"Setup {k}: every deep r_i > 2")
+
+
 def main():
     print(f"engine version: {eng.get_engine_version() if hasattr(eng, 'get_engine_version') else '?'}")
     test_orbit_root()
     test_theta()
     test_master_secret()
     test_shamir()
+    test_setup_tiers()
     print("\nALL ORBIT FFI SMOKE TESTS PASSED")
 
 

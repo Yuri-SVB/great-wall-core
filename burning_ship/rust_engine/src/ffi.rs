@@ -1350,3 +1350,35 @@ pub extern "C" fn bs_shamir_interp(
     unsafe { slice::from_raw_parts_mut(out_sh, n).copy_from_slice(&sh) };
 }
 
+/// Canonical per-stage Shamir thresholds `t_i` for a setup `level` (1-based):
+/// index 0 is stage 0, `1..=N` the deep stages (`t_i == r_i`, `t_i·32` bits).
+///
+/// Query-then-fill (like `bs_salt_pepper_canonicalize`): pass `out = null` /
+/// `cap = 0` to learn the count `N+1`, then call again with a `u32` buffer of
+/// that size. Always returns the full count. Returns 0 for an invalid `level`
+/// (`0` or `> MAX_SETUP_LEVEL`) so the ABI never panics.
+#[no_mangle]
+pub extern "C" fn bs_setup_tier_thresholds(level: u32, out: *mut u32, cap: u32) -> u32 {
+    if level == 0 || level > crate::setup_tiers::MAX_SETUP_LEVEL {
+        return 0;
+    }
+    let t = crate::setup_tiers::thresholds(level);
+    if !out.is_null() && cap > 0 {
+        let n = t.len().min(cap as usize);
+        let o = unsafe { slice::from_raw_parts_mut(out, cap as usize) };
+        o[..n].copy_from_slice(&t[..n]);
+    }
+    t.len() as u32
+}
+
+/// Whether a setup `level` is **substandard** (the entry tier, Setup 1, with a
+/// 64-bit deep stage). Returns 1 if substandard, else 0 (0 also for an invalid
+/// `level`). Interfaces MUST surface this loudly wherever Setup 1 is offered.
+#[no_mangle]
+pub extern "C" fn bs_setup_tier_substandard(level: u32) -> u8 {
+    if level == 0 || level > crate::setup_tiers::MAX_SETUP_LEVEL {
+        return 0;
+    }
+    crate::setup_tiers::is_substandard(level) as u8
+}
+

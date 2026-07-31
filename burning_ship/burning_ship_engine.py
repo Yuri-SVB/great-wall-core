@@ -279,6 +279,18 @@ _lib.bs_shamir_interp.argtypes = [
 ]
 _lib.bs_shamir_interp.restype = None
 
+# Canonical setup-tier table (src/setup_tiers.rs): per-stage thresholds t_i and
+# the substandard flag for the entry tier. Query-then-fill for the thresholds.
+_lib.bs_setup_tier_thresholds.argtypes = [
+    ctypes.c_uint32,                   # level (1-based)
+    ctypes.POINTER(ctypes.c_uint32),   # out (nullable for count query)
+    ctypes.c_uint32,                   # cap
+]
+_lib.bs_setup_tier_thresholds.restype = ctypes.c_uint32
+
+_lib.bs_setup_tier_substandard.argtypes = [ctypes.c_uint32]  # level
+_lib.bs_setup_tier_substandard.restype = ctypes.c_uint8
+
 
 
 # ---------------------------------------------------------------------------
@@ -891,3 +903,21 @@ def sh_to_bytes(coeffs):
     for c in coeffs:
         out += int(c).to_bytes(4, "big")
     return bytes(out)
+
+
+def setup_tier_thresholds(level):
+    """Canonical per-stage thresholds t_i for a setup `level` (1-based): index 0
+    is stage 0, 1..N the deep stages (t_i == r_i, t_i*32 bits). Returns a list;
+    [] for an invalid level."""
+    count = _lib.bs_setup_tier_thresholds(level, None, 0)
+    if count == 0:
+        return []
+    buf = (ctypes.c_uint32 * count)()
+    _lib.bs_setup_tier_thresholds(level, buf, count)
+    return list(buf)
+
+
+def setup_tier_substandard(level):
+    """True iff `level` is the substandard entry tier (Setup 1, 64-bit deep
+    stage). UIs MUST surface this loudly wherever Setup 1 is offered."""
+    return bool(_lib.bs_setup_tier_substandard(level))
