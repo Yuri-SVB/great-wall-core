@@ -1,0 +1,103 @@
+{
+  "engine_version": "0.3.0",
+  "protocol_version": "0.4.0",
+  "sigma_hex": "c7f790fed7ad32f513c47dcc35488d54ac388b9a6b6ebe02d636822e50f0b745c830cfd3c7829dccf300cb6a7408e9dc9e387e42822159d845a78549240608a93fd923cfb95c23a6bf33d654135eca104045c9fbcb460a8268cb91e5e0b551f6c5c2cb950d94485b7068701d30f4a43a0d40cdc981085b0125e487f5edfd74a7",
+  "setup_level": 1,
+  "substandard": true,
+  "thresholds": [
+    2,
+    2
+  ],
+  "argon2_profile": 0,
+  "iterations": 1,
+  "vec_params": {
+    "max_iter": 200,
+    "target_good": 30,
+    "max_flood_points": 10000,
+    "min_grid_cells": 1024,
+    "p_max_shift": 1,
+    "exclusion_threshold_num": 204,
+    "rng_seed": 66
+  },
+  "vec_area": [
+    -2.0,
+    1.0,
+    -1.5,
+    1.0
+  ],
+  "terminal_k_hex": "aa19c05bead6b3f4db8f576c851232b715530e9749d2a733c1266a48b224a240",
+  "stages": [
+    {
+      "index": 0,
+      "threshold": 2,
+      "o_hex": "dd32b2e08eb0ce1191cdf54eea6b0ec07bba70f8531b0191cec4125bcd98e499",
+      "chunks_u32": [
+        "bb9a7b7f",
+        "e053519e"
+      ],
+      "fractals": [
+        {
+          "o": "8baefd915025d592",
+          "p": "e1759445b8966cfe",
+          "q": "f8d9680f03e6488a"
+        },
+        {
+          "o": "ddf392a93b3c9180",
+          "p": "8e7c1cfd9588423c",
+          "q": "08aeab3089ba7e43"
+        }
+      ],
+      "points": [
+        {
+          "re_raw": "f68305b3433e4fa5",
+          "im_raw": "f14f856eb51003d7"
+        },
+        {
+          "re_raw": "fe94987c6657cdd0",
+          "im_raw": "ed195fc0fc838085"
+        }
+      ],
+      "sh": [
+        "8d229d20",
+        "36b8e65f"
+      ],
+      "k_hex": "0c627c2321e2835427e1fea743bec3e18eaccf96b999c3eb71d2c7fb81b87718"
+    },
+    {
+      "index": 1,
+      "threshold": 2,
+      "o_hex": "bbeca72e0389fce973c107778155fe4d3389fc7d99468136c916904f29b77f97",
+      "chunks_u32": [
+        "da373a88",
+        "2362b17a"
+      ],
+      "fractals": [
+        {
+          "o": "b642a4ce3a8fe4c5",
+          "p": "934b7ca29cfee786",
+          "q": "73a8b505361ccd2d"
+        },
+        {
+          "o": "6320d699207695fa",
+          "p": "0beee1d1a4e2cab5",
+          "q": "ab06bb860df59462"
+        }
+      ],
+      "points": [
+        {
+          "re_raw": "f7730623a46eb067",
+          "im_raw": "ef1a375fd0d63ba7"
+        },
+        {
+          "re_raw": "0287e73579bb506f",
+          "im_raw": "f4d84f00b5da5d09"
+        }
+      ],
+      "sh": [
+        "72fbbc5d",
+        "a8cc86d5"
+      ],
+      "k_hex": "aa19c05bead6b3f4db8f576c851232b715530e9749d2a733c1266a48b224a240"
+    }
+  ]
+}
