@@ -1350,6 +1350,35 @@ pub extern "C" fn bs_shamir_interp(
     unsafe { slice::from_raw_parts_mut(out_sh, n).copy_from_slice(&sh) };
 }
 
+/// Evaluate the Shamir polynomial `sh` (`t` ascending `u32` coefficients, as
+/// produced by `bs_shamir_interp`) at abscissa `x` over GF(2^32) — Horner
+/// (`shamir::eval`). Exposed so callers never re-implement the field arithmetic.
+#[no_mangle]
+pub extern "C" fn bs_shamir_eval(sh_ptr: *const u32, t: u32, x: u32) -> u32 {
+    let sh = unsafe { slice::from_raw_parts(sh_ptr, t as usize) };
+    crate::shamir::eval(sh, x)
+}
+
+/// Materialise `count` **forgetting-resistance** share values from `sh` (the `t`
+/// ascending coefficients of `Sh_i`): `f(resistance_abscissa(k))` for
+/// `k` in `0..count`, written to the `count`-long `out` buffer. Keeps BOTH the
+/// GF(2^32) evaluation AND the reserved abscissa convention inside the engine,
+/// so an interface only asks for "the next `count` shares" (`shamir::eval` +
+/// `shamir::resistance_abscissa`).
+#[no_mangle]
+pub extern "C" fn bs_shamir_generate_resistance_shares(
+    sh_ptr: *const u32,
+    t: u32,
+    count: u32,
+    out: *mut u32,
+) {
+    let sh = unsafe { slice::from_raw_parts(sh_ptr, t as usize) };
+    let out = unsafe { slice::from_raw_parts_mut(out, count as usize) };
+    for (k, o) in out.iter_mut().enumerate() {
+        *o = crate::shamir::eval(sh, crate::shamir::resistance_abscissa(k as u32));
+    }
+}
+
 /// Canonical per-stage Shamir thresholds `t_i` for a setup `level` (1-based):
 /// index 0 is stage 0, `1..=N` the deep stages (`t_i == r_i`, `t_i·32` bits).
 ///
