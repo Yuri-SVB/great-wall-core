@@ -232,6 +232,62 @@ pub extern "C" fn bs_render_viewport_generic(
     }
 }
 
+/// Render a viewport with **exact** escape counts, using the perturbed formula.
+///
+/// Sampling is identical to [`bs_render_viewport_generic`] — pixel `(px, py)` is
+/// `(origin_re + px*step, origin_im + py*step)`, row-major — but each entry is a
+/// `u32` carrying the true escape count, with `max_iter` written for a
+/// non-escaping point.  Since [`escape_count_generic`] only ever returns values
+/// below `max_iter`, that sentinel is unambiguous.
+///
+/// Why this exists alongside the `u8` path: the `u8` encoding folds counts as
+/// `(e % PIXEL_ESCAPE_MOD) + 1`, so every level set 255 apart shares a value.
+/// That is harmless for colouring (the palette is cyclic anyway) but fatal for a
+/// consumer that must identify *one specific* level set — the canonical island's
+/// flood fill selects the pixels whose count equals the island's `escape_count`,
+/// and under folding it would leak into unrelated bands.  At the encode cap
+/// (`protocol::ENCODE_MAX_ITER` = 1024) the folding is not hypothetical: it
+/// aliases four ways.
+///
+/// This path deliberately does **not** consult `RENDER_CACHE_STAGE2`: cache
+/// entries are keyed on coordinates alone, with no `max_iter` in the key, so a
+/// value computed under a different cap would be served here — and an exact
+/// count under the wrong cap is precisely what this entry point exists to avoid.
+#[no_mangle]
+pub extern "C" fn bs_render_viewport_generic_u32(
+    origin_re: f64,
+    origin_im: f64,
+    step: f64,
+    out_w: i32,
+    out_h: i32,
+    max_iter: u32,
+    o: u64,
+    p: u64,
+    q: u64,
+    out_counts: *mut u32,
+) {
+    if out_counts.is_null() || out_w <= 0 || out_h <= 0 {
+        return;
+    }
+    let w = out_w as usize;
+    let h = out_h as usize;
+    let counts = unsafe { slice::from_raw_parts_mut(out_counts, w * h) };
+
+    counts
+        .par_chunks_mut(w)
+        .enumerate()
+        .for_each(|(py, row)| {
+            let im = Fixed::from_f64(origin_im + py as f64 * step);
+            for (px, cell) in row.iter_mut().enumerate() {
+                let re = Fixed::from_f64(origin_re + px as f64 * step);
+                *cell = match escape_count_generic(re, im, max_iter, o, p, q) {
+                    Some(i) => i,
+                    None => max_iter,
+                };
+            }
+        });
+}
+
 /// Opaque handle for encode results.
 pub struct EncodeResultHandle {
     result: EncodeResult,
@@ -1411,3 +1467,93 @@ pub extern "C" fn bs_setup_tier_substandard(level: u32) -> u8 {
     crate::setup_tiers::is_substandard(level) as u8
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The exact-count raster must agree pixel-for-pixel with the scalar
+    /// `escape_count_generic`, and must use `max_iter` (a value the scalar never
+    /// returns) for non-escaping points.
+    #[test]
+    fn render_viewport_generic_u32_is_exact() {
+        const W: i32 = 24;
+        const H: i32 = 16;
+        const MAX_ITER: u32 = 1024;
+        let (origin_re, origin_im, step) = (-2.5f64, -2.0f64, 4.0 / W as f64);
+
+        let mut counts = vec![0u32; (W * H) as usize];
+        bs_render_viewport_generic_u32(
+            origin_re, origin_im, step, W, H, MAX_ITER, 0, 0, 0, counts.as_mut_ptr(),
+        );
+
+        for py in 0..H as usize {
+            let im = Fixed::from_f64(origin_im + py as f64 * step);
+            for px in 0..W as usize {
+                let re = Fixed::from_f64(origin_re + px as f64 * step);
+                let expected = match escape_count_generic(re, im, MAX_ITER, 0, 0, 0) {
+                    Some(i) => i,
+                    None => MAX_ITER,
+                };
+                let got = counts[py * W as usize + px];
+                assert_eq!(got, expected, "mismatch at ({px},{py})");
+                assert!(got <= MAX_ITER, "count {got} above the cap at ({px},{py})");
+            }
+        }
+    }
+
+    /// The whole point of the entry point: counts above `PIXEL_ESCAPE_MOD` are
+    /// preserved, where the `u8` path folds them back into 1..=255.  Rendering a
+    /// view that reaches past 255 iterations must therefore disagree with the
+    /// folded encoding on at least one pixel — and agree with it modulo 255.
+    #[test]
+    fn render_viewport_generic_u32_does_not_fold() {
+        const W: i32 = 32;
+        const H: i32 = 32;
+        const MAX_ITER: u32 = 1024;
+        // A window tight on the perturbed set's boundary, where escape counts
+        // climb well past 255 (the same regime the encoder's leaves live in).
+        let (origin_re, origin_im, step) = (-0.292f64, -0.890f64, 0.004 / W as f64);
+
+        let mut counts = vec![0u32; (W * H) as usize];
+        bs_render_viewport_generic_u32(
+            origin_re, origin_im, step, W, H, MAX_ITER, 0, 0, 0, counts.as_mut_ptr(),
+        );
+
+        let mut pixels = vec![0u8; (W * H) as usize];
+        bs_render_viewport_generic(
+            origin_re, origin_im, step, W, H, MAX_ITER, 0, 0, 0, pixels.as_mut_ptr(),
+        );
+
+        let mut folded_away = 0usize;
+        for i in 0..counts.len() {
+            let exact = counts[i];
+            let u8_count = if pixels[i] == 0 { None } else { Some(pixels[i] as u32 - 1) };
+            match u8_count {
+                // Non-escaping agrees on both paths.
+                None => assert_eq!(exact, MAX_ITER, "pixel {i}: u8 says inside, u32 says {exact}"),
+                Some(folded) => {
+                    assert_eq!(exact % PIXEL_ESCAPE_MOD, folded, "pixel {i}: not congruent");
+                    if exact >= PIXEL_ESCAPE_MOD {
+                        folded_away += 1;
+                    }
+                }
+            }
+        }
+        assert!(
+            folded_away > 0,
+            "test window never exceeded {PIXEL_ESCAPE_MOD} iterations — it cannot \
+             demonstrate that folding loses information",
+        );
+    }
+
+    /// A null buffer or a degenerate size must be a no-op, not a panic across
+    /// the ABI.
+    #[test]
+    fn render_viewport_generic_u32_rejects_degenerate_args() {
+        bs_render_viewport_generic_u32(0.0, 0.0, 0.01, 8, 8, 32, 0, 0, 0, std::ptr::null_mut());
+        let mut counts = vec![7u32; 4];
+        bs_render_viewport_generic_u32(0.0, 0.0, 0.01, 0, 8, 32, 0, 0, 0, counts.as_mut_ptr());
+        bs_render_viewport_generic_u32(0.0, 0.0, 0.01, 8, -1, 32, 0, 0, 0, counts.as_mut_ptr());
+        assert_eq!(counts, vec![7u32; 4], "degenerate call must not write");
+    }
+}
