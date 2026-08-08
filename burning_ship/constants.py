@@ -6,6 +6,9 @@ constants, and size presets live here so that other modules can
 import them without pulling in pygame or heavy dependencies.
 """
 
+# PROFILE_* and ARGON2ID_MASTER_OUTPUT_BYTES are unused *here* but deliberately
+# re-exported: encoding.py, session.py and protocol.py import them from this
+# module.  Do not drop them as "unused imports".
 from burning_ship_engine import (
     DiscoveryParams, Rect,
     PROFILE_BASIC, PROFILE_ADVANCED, PROFILE_GREAT_WALL,
@@ -110,15 +113,13 @@ Q_MAGNITUDE_MIN_EXP = 5
 # NOTE (protocol 0.3.0): this is *no longer a privileged "canonical" first
 # fractal*.  Every point stage — including the first — derives its (o, p, q)
 # from the memory-hard chain seeded by stage-0 text (see protocol.py), so there
-# is no public surface an attacker knows in advance.  These constants are kept
-# only for the DEPRECATED two-stage helpers in encoding.py; the live pipeline
-# never uses them.
-STAGE1_O = 0   # o=0 ⇒ orbit seed z₀ = 0
-STAGE1_P = 0   # p=0 ⇒ additive shift only the baseline (+1/8, +1/8)
-STAGE1_Q = 0   # q=0 ⇒ no εz term
-CANONICAL_O = STAGE1_O   # back-compat alias (deprecated; see note above)
-CANONICAL_P = STAGE1_P
-CANONICAL_Q = STAGE1_Q
+# is no public surface an attacker knows in advance.  The name is retained only
+# because it is what the viewer's pre-derivation fallback is called; the only
+# live use is rendering *something* in the viewport while a stage's real
+# parameters are still being derived (viewer.py, ViewerState.active_params).
+CANONICAL_O = 0   # o=0 ⇒ orbit seed z₀ = 0
+CANONICAL_P = 0   # p=0 ⇒ additive shift only the baseline (+1/8, +1/8)
+CANONICAL_Q = 0   # q=0 ⇒ no εz term
 
 # ---------------------------------------------------------------------------
 # Argon2

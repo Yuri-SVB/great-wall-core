@@ -11,7 +11,7 @@ import time
 # Add parent dir to path
 sys.path.insert(0, '.')
 
-from burning_ship_engine import encode, decode, get_precision, DiscoveryParams, Rect, DEFAULT_AREA, fixed_to_f64
+from burning_ship_engine import encode, decode, get_precision, DiscoveryParams, Rect
 
 
 def test_bijection(bits, label="", params=None, area=None):

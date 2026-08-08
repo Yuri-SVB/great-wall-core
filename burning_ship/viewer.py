@@ -49,8 +49,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from burning_ship_engine import (
-    encode, decode, decode_full, get_precision, DiscoveryParams, Rect,
-    DEFAULT_AREA, render_viewport, render_viewport_generic,
+    decode_full,
     cache_init, cache_destroy, cache_clear,
     fixed_to_f64, fixed_from_f64, FIXED_ONE,
     cache_init_stage2, cache_destroy_stage2, cache_clear_stage2,
@@ -61,34 +60,31 @@ from bip39 import (
     mnemonic_to_bits, bits_to_mnemonic,
     )
 from constants import (
-    PALETTE_SIZE, DEFAULT_MAX_ITER, MAX_ITER_MIN, MAX_ITER_MAX,
+    DEFAULT_MAX_ITER, MAX_ITER_MIN, MAX_ITER_MAX,
     DEFAULT_CENTER_RE, DEFAULT_CENTER_IM, VIEWPORT_BASE_SPAN,
     PANEL_HEIGHT,
     CLR_NEUTRAL, CLR_SUCCESS, CLR_ERROR, CLR_WARNING, CLR_PENDING,
     CLR_INFO, CLR_BIT_OK, CLR_ADVANCE, CLR_STAGE_RDY, CLR_STAGE_ACT,
     CURSOR_BLINK_MS, POINT_CLICK_THRESHOLD_PX, DEBUG_HEX_FIELD_CHARS,
     DEFAULT_BIP39_MNEMONIC,
-    STAGE1_O, STAGE1_P, STAGE1_Q,
     CANONICAL_O, CANONICAL_P, CANONICAL_Q,
     LEAF_BRIGHTNESS_BOOST, LEAF_BRIGHTNESS_FLOOR,
     LEAF_SATURATION_BOOST, LEAF_SATURATION_THRESHOLD,
     BRIGHTNESS_FALLOFF_BASE, BRIGHTNESS_EXPONENT_OFFSET,
     BRIGHTNESS_OFFSET_STEP,
     PROGRESSIVE_INITIAL_BLOCK,
-    CONTRACTION_MULTIPLIER, CONTRACTION_DIVISOR,
     BITS_PER_POINT, SIZE_PRESETS, SIZE_PRESET_ORDER, INITIAL_SIZE_PRESET,
     ENCODE_AREA, GUI_PARAMS,
 )
 import protocol
 
 from palettes import (
-    PALETTES, PALETTE_NAMES, PALETTE_LUTS,
+    PALETTE_NAMES, PALETTE_LUTS,
     ESC_TRANSFORMS, ESC_TRANSFORM_NAMES,
 )
 from encoding import (
-    argon2_path_marker,
     decode_points,
-    bits_to_bytes, bits_to_hex, compute_checksum_bits,
+    bits_to_hex,
 )
 from argon2_pipeline import (
     run_argon2_iterative,
@@ -96,7 +92,7 @@ from argon2_pipeline import (
     run_random_encode, run_full_encode,
 )
 from session import (
-    copy_to_clipboard, paste_from_clipboard,
+    copy_to_clipboard,
     save_session, load_session,
 )
 from text_input import handle_text_input

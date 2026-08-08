@@ -4,7 +4,7 @@ Text input field keyboard handling for the BIP39 input.
 
 import pygame
 
-from constants import CLR_SUCCESS, CLR_ERROR
+from constants import CLR_ERROR
 from session import copy_to_clipboard, paste_from_clipboard
 
 

@@ -37,7 +37,7 @@ import struct
 from burning_ship_engine import (
     encode, decode_full, argon2id_master,
     orbit_root, theta, master_secret, orbit_advance,
-    shamir_interp, sh_to_bytes, setup_tier_thresholds, setup_tier_substandard,
+    shamir_interp, sh_to_bytes, setup_tier_thresholds,
     PROFILE_BASIC,
 )
 from constants import (

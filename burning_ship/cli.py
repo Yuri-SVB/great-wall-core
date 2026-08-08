@@ -32,16 +32,14 @@ import argparse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from burning_ship_engine import (
-    encode, decode_full, get_engine_version, DiscoveryParams,
+    decode_full, get_engine_version,
     PROFILE_BASIC, PROFILE_ADVANCED, PROFILE_GREAT_WALL,
-    ARGON2_DIGEST_BYTES, argon2_single,
-    fixed_to_f64,
     setup_tier_thresholds, setup_tier_substandard,
 )
 from bip39 import mnemonic_to_bits, bits_to_mnemonic
 from constants import (
     BITS_PER_POINT, ENCODE_AREA, GUI_PARAMS,
-    SIZE_PRESETS, ARGON2_INPUT_BYTES,
+    SIZE_PRESETS,
 )
 from encoding import bits_to_bytes, bits_to_hex, stage_text_bytes, normalize_stage_text
 from protocol import (

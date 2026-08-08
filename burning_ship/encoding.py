@@ -5,10 +5,8 @@ BIP39 ↔ fractal point encoding/decoding and bit-conversion utilities.
 import hashlib
 
 from burning_ship_engine import encode, decode_full
-from bip39 import mnemonic_to_bits, bits_to_mnemonic
 from constants import (
     BITS_PER_POINT, ENCODE_AREA, GUI_PARAMS,
-    STAGE1_O, STAGE1_P, STAGE1_Q,
     PROFILE_BASIC, PROFILE_ADVANCED, PROFILE_GREAT_WALL,
 )
 
@@ -22,66 +20,7 @@ def argon2_path_marker(profile, iterations):
     return f"{tag}{iterations}"
 
 
-def encode_bip39(mnemonic_str, num_points=1):
-    """Encode a BIP39 mnemonic into fractal points (first stage).
-
-    DEPRECATED: legacy two-stage helper.  The one-point-per-stage protocol
-    drives encoding through :func:`protocol.encode_entropy`; this remains only
-    for the not-yet-migrated GUI path.  num_points defaults to 1 (one point
-    per stage).
-    """
-    bits = mnemonic_to_bits(mnemonic_str)
-    entropy_bits = bits[:len(bits) - len(bits) // 33]  # strip checksum
-    stage1_bits = entropy_bits[:num_points * BITS_PER_POINT]
-    chunks = [stage1_bits[i*BITS_PER_POINT:(i+1)*BITS_PER_POINT]
-              for i in range(num_points)]
-
-    points = []
-    all_steps = []
-    final_rects = []
-    for chunk in chunks:
-        result = encode(chunk, area=ENCODE_AREA, params=GUI_PARAMS,
-                        o=STAGE1_O, p=STAGE1_P, q=STAGE1_Q, path_prefix="O")
-        points.append((
-            result.point_re,
-            result.point_im,
-            result.point_re_raw,
-            result.point_im_raw,
-        ))
-        all_steps.append(result.get_all_steps())
-        final_rects.append(result.final_rect)
-    return points, chunks, all_steps, final_rects
-
-
-def encode_bip39_stage2(mnemonic_str, o, p, q, num_points=1):
-    """Encode the last entropy bits into fractal points (stage 2).
-
-    DEPRECATED: legacy two-stage helper; see :func:`encode_bip39`.
-    """
-    bits = mnemonic_to_bits(mnemonic_str)
-    entropy_bits = bits[:len(bits) - len(bits) // 33]  # strip checksum
-    stage2_bits = entropy_bits[num_points * BITS_PER_POINT:]
-    chunks = [stage2_bits[i*BITS_PER_POINT:(i+1)*BITS_PER_POINT]
-              for i in range(num_points)]
-
-    points = []
-    all_steps = []
-    final_rects = []
-    for chunk in chunks:
-        result = encode(chunk, area=ENCODE_AREA, params=GUI_PARAMS,
-                        o=o, p=p, q=q, path_prefix="O")
-        points.append((
-            result.point_re,
-            result.point_im,
-            result.point_re_raw,
-            result.point_im_raw,
-        ))
-        all_steps.append(result.get_all_steps())
-        final_rects.append(result.final_rect)
-    return points, chunks, all_steps, final_rects
-
-
-def decode_points(raw_points, o=STAGE1_O, p=STAGE1_P, q=STAGE1_Q):
+def decode_points(raw_points, o, p, q):
     """Decode raw (re_raw, im_raw) points back to entropy bits (32 per point).
 
     Returns (all_bits, step_lists, final_rects).
@@ -99,27 +38,6 @@ def decode_points(raw_points, o=STAGE1_O, p=STAGE1_P, q=STAGE1_Q):
                         o=o, p=p, q=q, path_prefix="O")
         step_lists.append(result.get_all_steps())
     return all_bits, step_lists, final_rects
-
-
-def encode_bits_stage(stage_bits, o, p, q):
-    """Encode stage bits into fractal points (32 bits each).
-
-    Returns (points, chunks, steps, final_rects).
-    """
-    num_points = len(stage_bits) // BITS_PER_POINT
-    chunks = [stage_bits[i*BITS_PER_POINT:(i+1)*BITS_PER_POINT]
-              for i in range(num_points)]
-    points = []
-    all_steps = []
-    final_rects = []
-    for chunk in chunks:
-        result = encode(chunk, area=ENCODE_AREA, params=GUI_PARAMS,
-                        o=o, p=p, q=q, path_prefix="O")
-        points.append((result.point_re, result.point_im,
-                        result.point_re_raw, result.point_im_raw))
-        all_steps.append(result.get_all_steps())
-        final_rects.append(result.final_rect)
-    return points, chunks, all_steps, final_rects
 
 
 # ---------------------------------------------------------------------------

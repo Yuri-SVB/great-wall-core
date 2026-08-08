@@ -44,13 +44,6 @@ _lib = ctypes.CDLL(_lib_path)
 _lib.bs_escape_count.argtypes = [ctypes.c_double, ctypes.c_double, ctypes.c_uint32]
 _lib.bs_escape_count.restype = ctypes.c_int32
 
-_lib.bs_render_viewport.argtypes = [
-    ctypes.c_double, ctypes.c_double, ctypes.c_double,
-    ctypes.c_int32, ctypes.c_int32, ctypes.c_uint32,
-    ctypes.POINTER(ctypes.c_uint8),
-]
-_lib.bs_render_viewport.restype = None
-
 _lib.bs_render_viewport_generic.argtypes = [
     ctypes.c_double, ctypes.c_double, ctypes.c_double,
     ctypes.c_int32, ctypes.c_int32, ctypes.c_uint32,
@@ -797,30 +790,6 @@ def argon2id_master(message, out_len=ARGON2ID_MASTER_OUTPUT_BYTES):
     out = (ctypes.c_uint8 * out_len)()
     _lib.bs_argon2id_master(inp, n, out, out_len)
     return bytes(out)
-
-
-def render_viewport(origin_re, origin_im, step, width, height, max_iter=2048):
-    """Render an escape-count map. Returns bytes (0=non-escaping, 1-255=escape count)."""
-    import numpy as np
-    pixels = np.zeros(width * height, dtype=np.uint8)
-    _lib.bs_render_viewport(
-        origin_re, origin_im, step,
-        width, height, max_iter,
-        pixels.ctypes.data_as(ctypes.POINTER(ctypes.c_uint8)),
-    )
-    return pixels.reshape(height, width)
-
-
-def render_viewport_generic(origin_re, origin_im, step, width, height, p, max_iter=2048):
-    """Render using perturbed Burning Ship: z <- (|Re(z)|+Re(p) + i(|Im(z)|+Im(p)))² + c."""
-    import numpy as np
-    pixels = np.zeros(width * height, dtype=np.uint8)
-    _lib.bs_render_viewport_generic(
-        origin_re, origin_im, step,
-        width, height, max_iter, p,
-        pixels.ctypes.data_as(ctypes.POINTER(ctypes.c_uint8)),
-    )
-    return pixels.reshape(height, width)
 
 
 # ---------------------------------------------------------------------------
