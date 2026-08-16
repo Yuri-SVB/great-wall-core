@@ -100,25 +100,48 @@ const GW_TIME_COST: u32 = 2;
 const GW_PARALLELISM: u32 = 1;
 
 // --- Common ---
-const ARGON2_HASH_LEN: usize = 32;      // 256-bit digest
+const ARGON2_HASH_LEN: usize = 32;      // 256-bit digest — legacy 0.3.0 chain
+/// Orbit (`0.5.0`) digest width: 512 bits, matching `orbit::ORBIT_POINT_LEN`.
+///
+/// Deliberately distinct from [`ARGON2_HASH_LEN`]: the deprecated 0.3.0 chain
+/// still derives its stage reservoirs from a 256-bit digest, and widening that
+/// would change the chain as collateral damage. Note also that these are not
+/// prefixes of one another — Argon2's output length is an input to its final
+/// hash, so a 32- and a 64-byte run of the same password differ throughout.
+pub const ORBIT_ARGON2_HASH_LEN: usize = 64;
 const ARGON2_SALT: &[u8] = b"greatwall";
 
-fn make_argon2(profile: Profile) -> Argon2<'static> {
+fn make_argon2_len(profile: Profile, out_len: usize) -> Argon2<'static> {
     let (mem, time, par) = match profile {
         PROFILE_ADVANCED   => (ADV_MEMORY_KIB,   ADV_TIME_COST,   ADV_PARALLELISM),
         PROFILE_GREAT_WALL => (GW_MEMORY_KIB,    GW_TIME_COST,    GW_PARALLELISM),
         _                  => (BASIC_MEMORY_KIB,  BASIC_TIME_COST, BASIC_PARALLELISM),
     };
-    let params = Params::new(mem, time, par, Some(ARGON2_HASH_LEN))
+    let params = Params::new(mem, time, par, Some(out_len))
         .expect("valid Argon2 params");
     Argon2::new(Algorithm::Argon2d, Version::V0x13, params)
 }
 
+fn make_argon2(profile: Profile) -> Argon2<'static> {
+    make_argon2_len(profile, ARGON2_HASH_LEN)
+}
+
 /// Run a single Argon2d pass on arbitrary-length input.
-/// Returns 32 bytes (256-bit digest).
+/// Returns 32 bytes (256-bit digest). Legacy 0.3.0 chain only.
 pub fn argon2_single(input: &[u8], profile: Profile) -> [u8; ARGON2_HASH_LEN] {
     let argon2 = make_argon2(profile);
     let mut digest = [0u8; ARGON2_HASH_LEN];
+    argon2
+        .hash_password_into(input, ARGON2_SALT, &mut digest)
+        .expect("Argon2 hash failed");
+    digest
+}
+
+/// `H*` for the orbit — one Argon2d pass returning **64 bytes** (512-bit
+/// digest), the memory-hard step of the `0.5.0` advance.
+pub fn orbit_argon2_single(input: &[u8], profile: Profile) -> [u8; ORBIT_ARGON2_HASH_LEN] {
+    let argon2 = make_argon2_len(profile, ORBIT_ARGON2_HASH_LEN);
+    let mut digest = [0u8; ORBIT_ARGON2_HASH_LEN];
     argon2
         .hash_password_into(input, ARGON2_SALT, &mut digest)
         .expect("Argon2 hash failed");

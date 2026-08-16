@@ -870,6 +870,26 @@ pub extern "C" fn bs_argon2_single(
     }
 }
 
+/// `H*` for the orbit — one Argon2d pass returning [`bs_orbit_point_len`] bytes
+/// (512-bit digest, `0.5.0`).
+///
+/// Distinct from [`bs_argon2_single`], which stays at 256 bits for the
+/// deprecated 0.3.0 chain. Designed to be called in a loop so a caller can
+/// stream progress and checkpoint each pass.
+#[no_mangle]
+pub extern "C" fn bs_orbit_argon2_single(
+    input_ptr: *const u8,
+    input_len: u32,
+    profile: u8,
+    out_digest: *mut u8,
+) {
+    let input = unsafe { slice::from_raw_parts(input_ptr, input_len as usize) };
+    let digest = crate::argon2_hash::orbit_argon2_single(input, profile);
+    unsafe {
+        slice::from_raw_parts_mut(out_digest, ORBIT_LEN).copy_from_slice(&digest);
+    }
+}
+
 /// Canonicalize a stage-0 salt/pepper string to the protocol's `[A-Z0-9-]`
 /// set (up-case ASCII letters, drop everything else). This is the single
 /// source of truth for the rule (DESIGN.md "Strong text restrictions"); the
@@ -1319,7 +1339,10 @@ pub extern "C" fn bs_canonical_island_free(handle: *mut CanonicalIslandHandle) {
 }
 
 // ---------------------------------------------------------------------------
-// Orbit protocol (0.4.0) — engine-authoritative primitives.
+// Orbit protocol (0.5.0) — engine-authoritative primitives.
+
+/// Orbit digest width shared by every entry point below.
+const ORBIT_LEN: usize = crate::orbit::ORBIT_POINT_LEN;
 //
 // These expose the orbit derivation (crate::orbit) and the GF(2^32) share
 // layer (crate::shamir) over the C ABI so callers read the protocol from the
@@ -1328,28 +1351,53 @@ pub extern "C" fn bs_canonical_island_free(handle: *mut CanonicalIslandHandle) {
 // later step (see great-wall-docs/next-steps/core-orbit-redesign-plan.md §5).
 // ---------------------------------------------------------------------------
 
-/// `o_0 = H(σ)` — orbit root from the public Namtso salt. Writes 32 bytes.
+/// `o_0 = H(σ)` — orbit root from the public Namtso salt.
+/// Writes [`bs_orbit_point_len`] bytes.
 #[no_mangle]
 pub extern "C" fn bs_orbit_root(sigma_ptr: *const u8, sigma_len: u32, out_digest: *mut u8) {
     let sigma = unsafe { slice::from_raw_parts(sigma_ptr, sigma_len as usize) };
     let digest = crate::orbit::orbit_root(sigma);
-    unsafe { slice::from_raw_parts_mut(out_digest, 32).copy_from_slice(&digest) };
+    unsafe { slice::from_raw_parts_mut(out_digest, ORBIT_LEN).copy_from_slice(&digest) };
+}
+
+/// Width of every orbit digest across this ABI, in bytes (`0.5.0`: SHA-512).
+/// Callers MUST size every `o_ptr` / `out_*` orbit buffer to this.
+#[no_mangle]
+pub extern "C" fn bs_orbit_point_len() -> u32 {
+    ORBIT_LEN as u32
 }
 
 /// `theta_i_j = H(o_i ‖ j)` — parameter digest of board `j` at orbit point `o_i`
-/// (`o_ptr` = 32 bytes). Writes the 32-byte digest; `(o,p,q)` attribution is
-/// applied downstream, unchanged.
+/// (`o_ptr` = [`bs_orbit_point_len`] bytes). Writes that many bytes; `(o,p,q)`
+/// attribution takes the first three big-endian u64s downstream, unchanged.
 #[no_mangle]
 pub extern "C" fn bs_theta(o_ptr: *const u8, j: u32, out_digest: *mut u8) {
-    let mut o = [0u8; 32];
-    o.copy_from_slice(unsafe { slice::from_raw_parts(o_ptr, 32) });
+    let mut o = [0u8; ORBIT_LEN];
+    o.copy_from_slice(unsafe { slice::from_raw_parts(o_ptr, ORBIT_LEN) });
     let digest = crate::orbit::theta_digest(&o, j);
-    unsafe { slice::from_raw_parts_mut(out_digest, 32).copy_from_slice(&digest) };
+    unsafe { slice::from_raw_parts_mut(out_digest, ORBIT_LEN).copy_from_slice(&digest) };
 }
 
-/// `K_i = H(o_i ‖ Sh_i)` — per-stage master secret (`i > 0`), the cheap-`H`
-/// commitment. `o_ptr` = 32 bytes; `sh_ptr`/`sh_len` = serialized Shamir
-/// polynomial. Writes 32 bytes.
+/// `u_i = H(o_i ‖ Sh_i)` — the orbit-advance commitment, the value `H*` consumes.
+/// **Not** the master secret: the two are domain-separated as of `0.5.0`.
+/// Exposed so a caller streaming the advance pass-by-pass can take the
+/// commitment itself rather than misusing [`bs_master_secret`] for it.
+#[no_mangle]
+pub extern "C" fn bs_orbit_commitment(
+    o_ptr: *const u8,
+    sh_ptr: *const u8,
+    sh_len: u32,
+    out_digest: *mut u8,
+) {
+    let mut o = [0u8; ORBIT_LEN];
+    o.copy_from_slice(unsafe { slice::from_raw_parts(o_ptr, ORBIT_LEN) });
+    let sh = unsafe { slice::from_raw_parts(sh_ptr, sh_len as usize) };
+    let digest = crate::orbit::commitment(&o, sh);
+    unsafe { slice::from_raw_parts_mut(out_digest, ORBIT_LEN).copy_from_slice(&digest) };
+}
+
+/// `K_i = TH(master-secret, o_i ‖ Sh_i)` — the per-stage master secret (`i > 0`).
+/// Internal: a holder receives [`bs_export_key`] of this, never this.
 #[no_mangle]
 pub extern "C" fn bs_master_secret(
     o_ptr: *const u8,
@@ -1357,17 +1405,39 @@ pub extern "C" fn bs_master_secret(
     sh_len: u32,
     out_digest: *mut u8,
 ) {
-    let mut o = [0u8; 32];
-    o.copy_from_slice(unsafe { slice::from_raw_parts(o_ptr, 32) });
+    let mut o = [0u8; ORBIT_LEN];
+    o.copy_from_slice(unsafe { slice::from_raw_parts(o_ptr, ORBIT_LEN) });
     let sh = unsafe { slice::from_raw_parts(sh_ptr, sh_len as usize) };
     let digest = crate::orbit::master_secret(&o, sh);
-    unsafe { slice::from_raw_parts_mut(out_digest, 32).copy_from_slice(&digest) };
+    unsafe { slice::from_raw_parts_mut(out_digest, ORBIT_LEN).copy_from_slice(&digest) };
 }
 
-/// One orbit step: writes `K_i = H(o_i ‖ Sh_i)` to `out_k` (32 bytes) and
-/// `o_{i+1} = H*(K_i)` (Argon2d `profile`, `steps` passes) to `out_next` (32
-/// bytes). The raw `{o_i, Sh_i}` copies are zeroized before the memory-hard
-/// step (crate::orbit::orbit_step). `profile`: 0=Basic, 1=Advanced, 2=Great Wall.
+/// `K_i^L = TH(export-label, K_i ‖ L)` — the exported key for canonicalised label
+/// `L`. Applied for every label including the empty one. `label_ptr` may be null
+/// when `label_len == 0`.
+#[no_mangle]
+pub extern "C" fn bs_export_key(
+    k_ptr: *const u8,
+    label_ptr: *const u8,
+    label_len: u32,
+    out_digest: *mut u8,
+) {
+    let mut k = [0u8; ORBIT_LEN];
+    k.copy_from_slice(unsafe { slice::from_raw_parts(k_ptr, ORBIT_LEN) });
+    let label: &[u8] = if label_ptr.is_null() || label_len == 0 {
+        &[]
+    } else {
+        unsafe { slice::from_raw_parts(label_ptr, label_len as usize) }
+    };
+    let digest = crate::orbit::export_key(&k, label);
+    unsafe { slice::from_raw_parts_mut(out_digest, ORBIT_LEN).copy_from_slice(&digest) };
+}
+
+/// One orbit step: writes `K_i` to `out_k` and `o_{i+1} = H*(u_i)` (Argon2d
+/// `profile`, `steps` passes) to `out_next`, both [`bs_orbit_point_len`] bytes.
+/// `K_i` and `u_i` are domain-separated, so the returned key does not advance the
+/// orbit. The raw `{o_i, Sh_i}` copies are zeroized before the memory-hard step
+/// (crate::orbit::orbit_step). `profile`: 0=Basic, 1=Advanced, 2=Great Wall.
 #[no_mangle]
 pub extern "C" fn bs_orbit_advance(
     o_ptr: *const u8,
@@ -1379,13 +1449,13 @@ pub extern "C" fn bs_orbit_advance(
     out_next: *mut u8,
 ) {
     use zeroize::Zeroizing;
-    let mut o = Zeroizing::new([0u8; 32]);
-    o.copy_from_slice(unsafe { slice::from_raw_parts(o_ptr, 32) });
+    let mut o = Zeroizing::new([0u8; ORBIT_LEN]);
+    o.copy_from_slice(unsafe { slice::from_raw_parts(o_ptr, ORBIT_LEN) });
     let sh = Zeroizing::new(unsafe { slice::from_raw_parts(sh_ptr, sh_len as usize) }.to_vec());
     let (k_i, o_next) = crate::orbit::orbit_step(o, sh, steps, profile);
     unsafe {
-        slice::from_raw_parts_mut(out_k, 32).copy_from_slice(&k_i);
-        slice::from_raw_parts_mut(out_next, 32).copy_from_slice(&o_next);
+        slice::from_raw_parts_mut(out_k, ORBIT_LEN).copy_from_slice(&k_i);
+        slice::from_raw_parts_mut(out_next, ORBIT_LEN).copy_from_slice(&o_next);
     }
 }
 
