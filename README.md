@@ -13,7 +13,9 @@ this library to a compatible commit. This repository has no submodules.
 ## Build
 
 ```sh
-pip install -r requirements.txt
+cargo build --release      # engine
+cargo test                 # Rust + bijection + frozen vectors
+python3 viewer.py          # reference viewer
 ```
 
 **⚡ Support:** [github.com/Yuri-SVB/SUPPORT](https://github.com/Yuri-SVB/SUPPORT) — free software, nothing gated.
