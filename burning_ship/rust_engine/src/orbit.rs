@@ -95,7 +95,7 @@ pub fn orbit_root(sigma: &[u8]) -> [u8; ORBIT_POINT_LEN] {
     h(&[sigma])
 }
 
-/// `theta_i_j := H(o_i ‖ j)` — the 32-byte parameter digest of fractal `j` of the
+/// `theta_i_j := H(o_i ‖ j)` — the parameter digest of fractal `j` of the
 /// stage at orbit point `o_i`.  The board index `j` is encoded big-endian (4
 /// bytes).  The `(o, p, q)` byte-attribution over this digest is unchanged from
 /// the prototype and applied downstream (DESIGN.md *Per-Fractal Parameter
@@ -174,8 +174,9 @@ pub fn advance_argon2(
 }
 
 /// One orbit step with the wipe enforced by ownership: compute the master secret
-/// `K_i = H(o_i ‖ Sh_i)` (instant), **drop (zeroize) the raw `{o_i, Sh_i}`**, then
-/// run the long `H*` on `K_i` alone to get `o_{i+1}`.  Returns `(K_i, o_{i+1})`.
+/// `K_i` and the commitment `u_i` (instant), **drop (zeroize) the raw
+/// `{o_i, Sh_i}`**, then run the long `H*` on `u_i` alone to get `o_{i+1}`.
+/// Returns `(K_i, o_{i+1})`.
 ///
 /// Generic over `hstar` for testing; see [`orbit_step`] for the Argon2 wrapper.
 pub fn orbit_step_with<F>(

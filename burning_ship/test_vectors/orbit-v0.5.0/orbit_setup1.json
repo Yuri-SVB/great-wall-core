@@ -1,0 +1,125 @@
+{
+  "engine_version": "0.3.0",
+  "protocol_version": "0.5.0",
+  "sigma_hex": "c7f790fed7ad32f513c47dcc35488d54ac388b9a6b6ebe02d636822e50f0b745c830cfd3c7829dccf300cb6a7408e9dc9e387e42822159d845a78549240608a93fd923cfb95c23a6bf33d654135eca104045c9fbcb460a8268cb91e5e0b551f6c5c2cb950d94485b7068701d30f4a43a0d40cdc981085b0125e487f5edfd74a7",
+  "setup_level": 1,
+  "substandard": true,
+  "thresholds": [
+    2,
+    2
+  ],
+  "argon2_profile": 0,
+  "iterations": 1,
+  "vec_params": {
+    "max_iter": 200,
+    "target_good": 30,
+    "max_flood_points": 10000,
+    "min_grid_cells": 1024,
+    "p_max_shift": 1,
+    "exclusion_threshold_num": 204,
+    "rng_seed": 66
+  },
+  "vec_area": [
+    -2.0,
+    1.0,
+    -1.5,
+    1.0
+  ],
+  "terminal_k_hex": "aaf9d65c2788413880df3b404a2fe06d85837597a9fc3bd7f9c62fc20d0a97941f91eec754a6b0a00f46dbd95450d5c9290fe7434e728f73851df7688bd21c83",
+  "stages": [
+    {
+      "index": 0,
+      "threshold": 2,
+      "o_hex": "3c100c3a7949870c03f8776698b957ac4662ee7de90cda15adae9352212a3998405c13031e0c97f13eedb9ece9638ec0130407792d3671457d68c3c542bafdc3",
+      "chunks_u32": [
+        "bb9a7b7f",
+        "e053519e"
+      ],
+      "fractals": [
+        {
+          "o": "b0edc26bbbdf44a0",
+          "p": "e383154cc3a84b74",
+          "q": "ab38286b69331bb3"
+        },
+        {
+          "o": "2a0c488d15549f04",
+          "p": "8d5ceaf2e5389b70",
+          "q": "5d61f1a68d87c1af"
+        }
+      ],
+      "points": [
+        {
+          "re_raw": "fd09720de19b41f7",
+          "im_raw": "ee9ca5bf0df319e9"
+        },
+        {
+          "re_raw": "f98cf4ebbfde9587",
+          "im_raw": "ef71b15c1fafb806"
+        }
+      ],
+      "sh": [
+        "8d229d20",
+        "36b8e65f"
+      ],
+      "u_hex": "809b7c0b6e66205d6373c9c0d52a24fb05f69df3b1c5f2c10d0eb83a77e294e89b96433d22f7f392183dd818fb5cf072f3d0bb2a4ed3f127241fb96950733977",
+      "k_hex": "84213e83fbbcd51469bd8b043339b032eb5ffc85be46c389434c4a1150b48525f7267f7a034aa9fe8bac45a11e5139996724b5f80b9f7a1ddb24b1390eb576a2",
+      "exports": [
+        {
+          "label": "",
+          "key_hex": "ac874d8e32d95b2e961b9f9a9d6eed1859e64f73358c30b48482a3bd15f9e40f22e9523b9675ed168cb8e28963e6724554caff108852c6852c0e47d27f80255c"
+        },
+        {
+          "label": "EXAMPLE-1",
+          "key_hex": "496e44609e7e0905c1e3c930138891ba6db6507b85943ae12be7d7aadcc71a7f14e506cfc961edd3bb7c8a5d22bdc8f130902ca24e0acd16df5542cbfe80158b"
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "threshold": 2,
+      "o_hex": "dabf1e6daeebe51439acf32956858a2c77e3309356017838331eee3886db424f228ff54ccd69d720322c4fb27c00bbef7360675c599a31a002cb61d145f2e80e",
+      "chunks_u32": [
+        "da373a88",
+        "2362b17a"
+      ],
+      "fractals": [
+        {
+          "o": "ce280f96a1fc0827",
+          "p": "90ec72f99e84be47",
+          "q": "ce74abcf10c23e74"
+        },
+        {
+          "o": "b8875b85f146c178",
+          "p": "b72578e9e55b5eb7",
+          "q": "06bbb2afe99c2fb8"
+        }
+      ],
+      "points": [
+        {
+          "re_raw": "058a93c3006dd483",
+          "im_raw": "ec7730094db54507"
+        },
+        {
+          "re_raw": "ee398668eb44cc20",
+          "im_raw": "f6785a0d0b377d16"
+        }
+      ],
+      "sh": [
+        "72fbbc5d",
+        "a8cc86d5"
+      ],
+      "u_hex": "2562463789d20a4046f72fbcdcd3d7000826bd66e4ce3992bf28d5966d86a86976cec9bb6f0208b2cfcde4487aac4a04952a9e88d7ef89516c23b170227ee13f",
+      "k_hex": "aaf9d65c2788413880df3b404a2fe06d85837597a9fc3bd7f9c62fc20d0a97941f91eec754a6b0a00f46dbd95450d5c9290fe7434e728f73851df7688bd21c83",
+      "exports": [
+        {
+          "label": "",
+          "key_hex": "7827653dc4b40c3c2c81cf523d61de59c8b309e273a34257ba19452c93fb2712659b4c458a5552b58328a9d42bb21a6dea5af88b3f092c80af38ea4b4dc426a7"
+        },
+        {
+          "label": "EXAMPLE-1",
+          "key_hex": "094f4896945211f8336938ea97f7f40c87dc0680b78c1ad5965131f5cb80e315a23f9ac3e91bbb99e3f5f60f50d019e9f780c59e606012970041f53ee7c5975d"
+        }
+      ]
+    }
+  ]
+}

@@ -254,6 +254,12 @@ def test_meta_leaf_membership(vectors_dir, verbose=False):
         print("  SKIP  meta-leaf-membership: no iter0 vectors")
         return True
     doc = json.load(open(os.path.join(vectors_dir, cands[0])))
+    # The recorded leaf is the ground truth below, so it must come from this
+    # engine's encode/decode algorithm; a STALE vector's leaf cannot reproduce.
+    if doc.get("version") != get_engine_version():
+        print(f"  SKIP  meta-leaf-membership: {cands[0]} is STALE "
+              f"(engine {doc.get('version')} != {get_engine_version()})")
+        return True
     stage0 = doc["stages"][0]
     leaf = stage0["leaf"]
     rmn, rmx = _parse_hex_i64(leaf["re_min"]), _parse_hex_i64(leaf["re_max"])

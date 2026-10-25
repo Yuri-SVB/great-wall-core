@@ -1,0 +1,27 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The Python package and the orbit tests load the release library.
+      - name: Build engine
+        working-directory: burning_ship/rust_engine
+        run: cargo build --release
+
+      # Rust unit tests, bijection, legacy vectors, and the orbit FFI,
+      # round-trip and frozen 0.5.0 vector tests.
+      - name: Run tests
+        run: bash burning_ship/run_tests.sh

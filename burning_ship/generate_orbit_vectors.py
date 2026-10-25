@@ -1,11 +1,12 @@
-"""Generate interim smoke vectors for the 0.4.0 orbit protocol.
+"""Generate interim smoke vectors for the 0.5.0 orbit protocol.
 
 core-orbit-redesign-plan.md §5 step 7 / §4: at least one interim smoke vector per
-setup tier — (sigma, setup-tier, D) -> {theta_i_j, p_i_j, Sh_i, o_i, K}. These
-pin reproducibility of the orbit derivation. Generation runs the REAL
-memory-hard advance (slow, Argon2d) so the o_i chain is genuine; the committed
-verifier (test_orbit_vectors.py) checks the cheap per-stage derivations against
-the frozen o_i without re-running the advance.
+setup tier — (sigma, setup-tier, D) -> {theta_i_j, p_i_j, Sh_i, o_i, u_i, K_i,
+K_i^L}. These pin reproducibility of the orbit derivation. Generation runs the
+REAL memory-hard advance (slow, Argon2d) so the o_i chain is genuine; the
+committed verifier (test_orbit_vectors.py) checks the cheap per-stage
+derivations against the frozen o_i without re-running the advance (its --full
+mode re-runs it).
 
 Run:  python3 generate_orbit_vectors.py   (from burning_ship/; slow — real Argon2)
 """
@@ -27,7 +28,10 @@ VEC_AREA = (-2.0, 1.0, -1.5, 1.0)  # re_min, re_max, im_min, im_max
 PROFILE = 0        # Basic
 ITERATIONS = 1     # D = 1 advance pass per stage transition
 OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                       "test_vectors", "orbit-v0.4.0")
+                       "test_vectors", "orbit-v0.5.0")
+# Export labels pinned per stage: the empty label (the default export, still
+# derived — K_i itself never leaves) and one sample canonical label.
+EXPORT_LABELS = ("", "EXAMPLE-1")
 
 
 def _hex_i64(v):
@@ -49,6 +53,7 @@ def build(level, seed):
 
     stage_docs = []
     for st, chunks in zip(stages, stage_chunks):
+        sh_bytes = eng.sh_to_bytes(st.sh)
         stage_docs.append({
             "index": st.index,
             "threshold": st.threshold,
@@ -59,7 +64,11 @@ def build(level, seed):
             "points": [{"re_raw": _hex_i64(re), "im_raw": _hex_i64(im)}
                        for (re, im) in st.points],
             "sh": [format(c, "08x") for c in st.sh],
+            "u_hex": eng.orbit_commitment(st.o_bytes, sh_bytes).hex(),
             "k_hex": st.k.hex(),
+            "exports": [{"label": label,
+                         "key_hex": eng.export_key(st.k, label.encode("ascii")).hex()}
+                        for label in EXPORT_LABELS],
         })
 
     return {

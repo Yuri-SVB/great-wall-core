@@ -1,4 +1,4 @@
-"""Round-trip test for the orbit-protocol (0.4.0) additive path in protocol.py.
+"""Round-trip test for the orbit protocol (0.5.0) in protocol.py.
 
 Validates encode_orbit <-> decode_orbit (entropy -> points -> entropy) and K_i
 consistency across setup tiers, using a CHEAP deterministic advance so the
@@ -29,8 +29,8 @@ TEST_AREA = Rect.from_f64(-2.0, 1.0, -1.5, 1.0)
 
 
 def cheap_advance(o_bytes, sh_bytes):
-    """Deterministic, fast stand-in for o_{i+1} = H*(K_i)."""
-    return hashlib.sha256(o_bytes + sh_bytes + b"ORBIT-ADVANCE").digest()
+    """Deterministic, fast stand-in for o_{i+1} = H*(u_i), at the orbit width."""
+    return hashlib.sha512(o_bytes + sh_bytes + b"ORBIT-ADVANCE").digest()
 
 
 def rand_chunk(rng):

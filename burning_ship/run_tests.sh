@@ -47,6 +47,19 @@ else
     FAIL=1
 fi
 
+for t in test_orbit_ffi test_orbit_protocol test_orbit_vectors; do
+    echo ""
+    echo "============================================"
+    echo "  Orbit: $t"
+    echo "============================================"
+    if python3 "$t.py"; then
+        echo "  => $t OK"
+    else
+        echo "  => $t FAILED"
+        FAIL=1
+    fi
+done
+
 echo ""
 echo "============================================"
 if [ $FAIL -eq 0 ]; then

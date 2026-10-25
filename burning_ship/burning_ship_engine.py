@@ -226,43 +226,69 @@ _lib.bs_argon2id_master.argtypes = [
 _lib.bs_argon2id_master.restype = None
 
 # ---------------------------------------------------------------------------
-# Orbit protocol (0.4.0) primitives — engine-authoritative (src/orbit.rs,
-# src/shamir.rs).  H = SHA-256 (cheap), H* = Argon2d.  These are additive: they
-# do NOT touch the 0.3.0 encode/decode pipeline (protocol.py is flipped to drive
-# through them in a later step — core-orbit-redesign-plan.md §5).
+# Orbit protocol (0.5.0) primitives — engine-authoritative (src/orbit.rs,
+# src/shamir.rs).  H = SHA-512 (cheap), H* = Argon2d at 512 bits.  Every orbit
+# buffer is bs_orbit_point_len() bytes (ORBIT_POINT_BYTES below).
 # ---------------------------------------------------------------------------
+_lib.bs_orbit_point_len.argtypes = []
+_lib.bs_orbit_point_len.restype = ctypes.c_uint32
+
 _lib.bs_orbit_root.argtypes = [
     ctypes.POINTER(ctypes.c_uint8),  # sigma_ptr (variable length)
     ctypes.c_uint32,                  # sigma_len
-    ctypes.POINTER(ctypes.c_uint8),  # out_digest (32 bytes)
+    ctypes.POINTER(ctypes.c_uint8),  # out_digest (orbit point)
 ]
 _lib.bs_orbit_root.restype = None
 
 _lib.bs_theta.argtypes = [
-    ctypes.POINTER(ctypes.c_uint8),  # o_ptr (32 bytes)
+    ctypes.POINTER(ctypes.c_uint8),  # o_ptr (orbit point)
     ctypes.c_uint32,                  # j (board index)
-    ctypes.POINTER(ctypes.c_uint8),  # out_digest (32 bytes)
+    ctypes.POINTER(ctypes.c_uint8),  # out_digest (orbit point)
 ]
 _lib.bs_theta.restype = None
 
-_lib.bs_master_secret.argtypes = [
-    ctypes.POINTER(ctypes.c_uint8),  # o_ptr (32 bytes)
+_lib.bs_orbit_commitment.argtypes = [
+    ctypes.POINTER(ctypes.c_uint8),  # o_ptr (orbit point)
     ctypes.POINTER(ctypes.c_uint8),  # sh_ptr (variable length)
     ctypes.c_uint32,                  # sh_len
-    ctypes.POINTER(ctypes.c_uint8),  # out_digest (32 bytes)
+    ctypes.POINTER(ctypes.c_uint8),  # out_digest (u_i)
+]
+_lib.bs_orbit_commitment.restype = None
+
+_lib.bs_master_secret.argtypes = [
+    ctypes.POINTER(ctypes.c_uint8),  # o_ptr (orbit point)
+    ctypes.POINTER(ctypes.c_uint8),  # sh_ptr (variable length)
+    ctypes.c_uint32,                  # sh_len
+    ctypes.POINTER(ctypes.c_uint8),  # out_digest (K_i)
 ]
 _lib.bs_master_secret.restype = None
 
+_lib.bs_export_key.argtypes = [
+    ctypes.POINTER(ctypes.c_uint8),  # k_ptr (K_i)
+    ctypes.POINTER(ctypes.c_uint8),  # label_ptr (canonical label; may be null if empty)
+    ctypes.c_uint32,                  # label_len
+    ctypes.POINTER(ctypes.c_uint8),  # out_digest (K_i^L)
+]
+_lib.bs_export_key.restype = None
+
+_lib.bs_orbit_argon2_single.argtypes = [
+    ctypes.POINTER(ctypes.c_uint8),  # input_ptr (variable length)
+    ctypes.c_uint32,                  # input_len
+    ctypes.c_uint8,                   # profile (0=Basic, 1=Advanced, 2=Great Wall)
+    ctypes.POINTER(ctypes.c_uint8),  # out_digest (orbit point)
+]
+_lib.bs_orbit_argon2_single.restype = None
+
 _lib.bs_orbit_advance.argtypes = [
-    ctypes.POINTER(ctypes.c_uint8),  # o_ptr (32 bytes)
+    ctypes.POINTER(ctypes.c_uint8),  # o_ptr (orbit point)
     ctypes.POINTER(ctypes.c_uint8),  # sh_ptr (variable length)
     ctypes.c_uint32,                  # sh_len
-    ctypes.c_uint32,                  # steps (D derivation passes)
+    ctypes.c_uint32,                  # steps (D derivation passes, >= 1)
     ctypes.c_uint8,                   # profile (0=Basic, 1=Advanced, 2=Great Wall)
-    ctypes.POINTER(ctypes.c_uint8),  # out_k (32 bytes: K_i)
-    ctypes.POINTER(ctypes.c_uint8),  # out_next (32 bytes: o_{i+1})
+    ctypes.POINTER(ctypes.c_uint8),  # out_k (K_i)
+    ctypes.POINTER(ctypes.c_uint8),  # out_next (o_{i+1})
 ]
-_lib.bs_orbit_advance.restype = None
+_lib.bs_orbit_advance.restype = ctypes.c_uint8  # ORBIT_ADVANCE_OK / _REJECTED
 
 _lib.bs_shamir_interp.argtypes = [
     ctypes.POINTER(ctypes.c_uint32),  # xs_ptr (t u32 abscissae)
@@ -793,62 +819,123 @@ def argon2id_master(message, out_len=ARGON2ID_MASTER_OUTPUT_BYTES):
 
 
 # ---------------------------------------------------------------------------
-# Orbit protocol (0.4.0) wrappers — see src/orbit.rs, src/shamir.rs and
-# great-wall-docs/great-wall-core/DESIGN.md (Orbit Protocol).  H = SHA-256.
+# Orbit protocol (0.5.0) wrappers — see src/orbit.rs, src/shamir.rs and
+# great-wall-docs/great-wall-core/DESIGN.md (Orbit Protocol).  H = SHA-512;
+# u_i and K_i are domain-separated (TH = BIP-340-style tagged hash):
+#
+#   u_i   = H(o_i ‖ Sh_i)                                — consumed by H*
+#   K_i   = TH("GreatWall/TGPO/master-secret/v1", o_i ‖ Sh_i)
+#   K_i^L = TH("GreatWall/TGPO/export-label/v1",  K_i ‖ L)  — the only export
 # ---------------------------------------------------------------------------
-ORBIT_POINT_BYTES = 32
+
+# Width of an orbit point / digest, published by the engine (64: SHA-512).
+ORBIT_POINT_BYTES = _lib.bs_orbit_point_len()
+
+# bs_orbit_advance status codes (src/ffi.rs ORBIT_ADVANCE_OK / _REJECTED).
+ORBIT_ADVANCE_OK = 1
+ORBIT_ADVANCE_REJECTED = 0
+
+
+def _orbit_point_in(o_i, name="o_i"):
+    """Copy an orbit point into a ctypes buffer, checking its width."""
+    assert len(o_i) == ORBIT_POINT_BYTES, \
+        f"{name} must be {ORBIT_POINT_BYTES} bytes, got {len(o_i)}"
+    return (ctypes.c_uint8 * ORBIT_POINT_BYTES)(*o_i)
+
+
+def _bytes_in(data):
+    """Copy variable-length bytes into a ctypes buffer (empty-safe)."""
+    n = len(data)
+    return (ctypes.c_uint8 * n)(*data), n
 
 
 def orbit_root(sigma):
-    """o_0 = H(sigma) — orbit root from the (Namtso) salt.  Returns 32 bytes."""
-    n = len(sigma)
-    inp = (ctypes.c_uint8 * n)(*sigma)
+    """o_0 = H(sigma) — orbit root from the (Namtso) salt."""
+    inp, n = _bytes_in(sigma)
     out = (ctypes.c_uint8 * ORBIT_POINT_BYTES)()
     _lib.bs_orbit_root(inp, n, out)
     return bytes(out)
 
 
 def theta(o_i, j):
-    """theta_i_j = H(o_i || j) — 32-byte fractal-parameter digest for board j.
+    """theta_i_j = H(o_i || j) — fractal-parameter digest for board j.
 
     The (o, p, q) byte-attribution over this digest is applied downstream,
     unchanged (DESIGN.md, Per-Fractal Parameter Derivation).
     """
-    assert len(o_i) == ORBIT_POINT_BYTES, "o_i must be 32 bytes"
-    o = (ctypes.c_uint8 * ORBIT_POINT_BYTES)(*o_i)
+    o = _orbit_point_in(o_i)
     out = (ctypes.c_uint8 * ORBIT_POINT_BYTES)()
     _lib.bs_theta(o, j, out)
     return bytes(out)
 
 
-def master_secret(o_i, sh):
-    """K_i = H(o_i || Sh_i) — per-stage master secret (i > 0); cheap H.
+def orbit_commitment(o_i, sh):
+    """u_i = H(o_i || Sh_i) — the orbit-advance commitment that H* consumes.
 
-    `sh` is the serialized Shamir polynomial (see sh_to_bytes).  Returns 32 bytes.
+    Not the master secret: a caller streaming the advance pass by pass seeds it
+    with this.  `sh` is the serialized Shamir polynomial (see sh_to_bytes).
     """
-    assert len(o_i) == ORBIT_POINT_BYTES, "o_i must be 32 bytes"
-    o = (ctypes.c_uint8 * ORBIT_POINT_BYTES)(*o_i)
-    m = len(sh)
-    shp = (ctypes.c_uint8 * m)(*sh)
+    o = _orbit_point_in(o_i)
+    shp, m = _bytes_in(sh)
+    out = (ctypes.c_uint8 * ORBIT_POINT_BYTES)()
+    _lib.bs_orbit_commitment(o, shp, m, out)
+    return bytes(out)
+
+
+def master_secret(o_i, sh):
+    """K_i = TH(master-secret, o_i || Sh_i) — per-stage master secret (i > 0).
+
+    Internal: what a holder receives is export_key(K_i, label), never K_i.
+    `sh` is the serialized Shamir polynomial (see sh_to_bytes).
+    """
+    o = _orbit_point_in(o_i)
+    shp, m = _bytes_in(sh)
     out = (ctypes.c_uint8 * ORBIT_POINT_BYTES)()
     _lib.bs_master_secret(o, shp, m, out)
     return bytes(out)
 
 
-def orbit_advance(o_i, sh, steps, profile=PROFILE_BASIC):
-    """One orbit step -> (K_i, o_next), with o_next = H*(K_i) over `steps` (D)
-    Argon2d passes.  K_i and the raw {o_i, Sh_i} copies are handled per
-    orbit_step (inputs zeroized before the memory-hard step).
+def export_key(k_i, label):
+    """K_i^L = TH(export-label, K_i || L) — the exported key for label `L`.
+
+    Applied for every label including the empty one.  `label` must already be
+    canonical ([A-Z0-9-], the engine's stage-text rule).
+    """
+    k = _orbit_point_in(k_i, "K_i")
+    lp, n = _bytes_in(label)
+    out = (ctypes.c_uint8 * ORBIT_POINT_BYTES)()
+    _lib.bs_export_key(k, lp, n, out)
+    return bytes(out)
+
+
+def orbit_argon2_single(input_bytes, profile=PROFILE_BASIC):
+    """One H* pass for the orbit: Argon2d at `profile`, 512-bit digest.
+
+    Distinct from argon2_single (256-bit, legacy 0.3.0 chain).  Iterating it
+    from orbit_commitment(o_i, Sh_i) D times reproduces orbit_advance's o_next.
 
     WARNING: runs real Argon2d at the profile's memory (>= 1 GiB) — heavy.
     """
-    assert len(o_i) == ORBIT_POINT_BYTES, "o_i must be 32 bytes"
-    o = (ctypes.c_uint8 * ORBIT_POINT_BYTES)(*o_i)
-    m = len(sh)
-    shp = (ctypes.c_uint8 * m)(*sh)
+    inp, n = _bytes_in(input_bytes)
+    out = (ctypes.c_uint8 * ORBIT_POINT_BYTES)()
+    _lib.bs_orbit_argon2_single(inp, n, profile, out)
+    return bytes(out)
+
+
+def orbit_advance(o_i, sh, steps, profile=PROFILE_BASIC):
+    """One orbit step -> (K_i, o_next), with o_next = H*(u_i) over `steps` (D)
+    Argon2d passes.  The raw {o_i, Sh_i} copies are zeroized engine-side before
+    the memory-hard step (orbit_step).  Raises ValueError if steps < 1.
+
+    WARNING: runs real Argon2d at the profile's memory (>= 1 GiB) — heavy.
+    """
+    o = _orbit_point_in(o_i)
+    shp, m = _bytes_in(sh)
     out_k = (ctypes.c_uint8 * ORBIT_POINT_BYTES)()
     out_next = (ctypes.c_uint8 * ORBIT_POINT_BYTES)()
-    _lib.bs_orbit_advance(o, shp, m, steps, profile, out_k, out_next)
+    status = _lib.bs_orbit_advance(o, shp, m, steps, profile, out_k, out_next)
+    if status != ORBIT_ADVANCE_OK:
+        raise ValueError(f"orbit_advance rejected steps={steps} (D must be >= 1)")
     return bytes(out_k), bytes(out_next)
 
 

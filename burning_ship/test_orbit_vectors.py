@@ -1,19 +1,21 @@
-"""Verify the frozen 0.4.0 orbit smoke vectors (test_vectors/orbit-v0.4.0/).
+"""Verify the frozen 0.5.0 orbit smoke vectors (test_vectors/orbit-v0.5.0/).
 
 FAST: reproduces the orbit's cheap per-stage derivations — theta_i_j -> (o,p,q),
-point decode, Sh_i, K_i — from the FROZEN o_i in each vector, so this does NOT
-re-run the memory-hard advance. The advance chain (o_{i+1} = H*(o_i, Sh_i)) was
-exercised when the vectors were generated (generate_orbit_vectors.py); a full
-clean-room reproduction re-runs it.
+point decode, Sh_i, u_i, K_i, K_i^L — from the FROZEN o_i in each vector, so this
+does NOT re-run the memory-hard advance. The advance chain (o_{i+1} = H*(u_i))
+was exercised when the vectors were generated (generate_orbit_vectors.py);
+`--full` re-runs it, one H* pass at a time from the frozen u_i (slow: Argon2d at
+the vector's profile, >= 1 GiB).
 
 STALE guard mirrors test_vectors.py: a vector whose engine/protocol version does
 not match the current build is reported STALE and skipped (never a false pass).
 
-Run:  python3 test_orbit_vectors.py   (from burning_ship/)
+Run:  python3 test_orbit_vectors.py [--full]   (from burning_ship/)
 """
 import glob
 import json
 import os
+import sys
 
 import protocol
 import burning_ship_engine as eng
@@ -21,7 +23,7 @@ from burning_ship_engine import decode_full, DiscoveryParams, Rect, get_engine_v
 from constants import BITS_PER_POINT
 
 VEC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                       "test_vectors", "orbit-v0.4.0")
+                       "test_vectors", "orbit-v0.5.0")
 
 
 def _from_hex_i64(h):
@@ -30,7 +32,7 @@ def _from_hex_i64(h):
     return v - (1 << 64) if v >= (1 << 63) else v
 
 
-def verify_vector(path):
+def verify_vector(path, full=False):
     name = os.path.basename(path)
     with open(path) as f:
         vec = json.load(f)
@@ -47,6 +49,7 @@ def verify_vector(path):
 
     failures = []
     last_k = None
+    advances = []  # (stage index, u_i) for --full
     for st in sorted(vec["stages"], key=lambda s: s["index"]):
         o_i = bytes.fromhex(st["o_hex"])
         t = st["threshold"]
@@ -73,10 +76,33 @@ def verify_vector(path):
         sh = eng.shamir_interp(xs, ys)
         if [format(c, "08x") for c in sh] != st["sh"]:
             failures.append(f"stage {st['index']}: Sh differs")
-        k = eng.master_secret(o_i, eng.sh_to_bytes(sh))
+        sh_bytes = eng.sh_to_bytes(sh)
+        u = eng.orbit_commitment(o_i, sh_bytes)
+        if u.hex() != st["u_hex"]:
+            failures.append(f"stage {st['index']}: u_i differs")
+        k = eng.master_secret(o_i, sh_bytes)
         if k.hex() != st["k_hex"]:
             failures.append(f"stage {st['index']}: K_i differs")
+        for ex in st["exports"]:
+            key = eng.export_key(k, ex["label"].encode("ascii"))
+            if key.hex() != ex["key_hex"]:
+                failures.append(f"stage {st['index']}: K_i^L differs "
+                                f"for label {ex['label']!r}")
         last_k = st["k_hex"]
+        advances.append((st["index"], u))
+
+    if full:
+        # o_{i+1} = H*^D(u_i): re-run the memory-hard advance from each frozen
+        # u_i and compare with the next stage's frozen o.
+        o_by_index = {st["index"]: st["o_hex"] for st in vec["stages"]}
+        for index, u in advances:
+            if index + 1 not in o_by_index:
+                continue
+            digest = u
+            for _ in range(vec["iterations"]):
+                digest = eng.orbit_argon2_single(digest, vec["argon2_profile"])
+            if digest.hex() != o_by_index[index + 1]:
+                failures.append(f"stage {index}: H*(u_i) != frozen o_{index + 1}")
 
     if last_k != vec["terminal_k_hex"]:
         failures.append("terminal K != last stage K")
@@ -92,6 +118,7 @@ def verify_vector(path):
 
 
 def main():
+    full = "--full" in sys.argv[1:]
     paths = sorted(glob.glob(os.path.join(VEC_DIR, "orbit_setup*.json")))
     if not paths:
         print(f"no orbit vectors found in {VEC_DIR}")
@@ -100,7 +127,7 @@ def main():
           f"{protocol.PROTOCOL_VERSION}) ===")
     passed = failed = stale = 0
     for p in paths:
-        r = verify_vector(p)
+        r = verify_vector(p, full=full)
         if r is None:
             stale += 1
         elif r:

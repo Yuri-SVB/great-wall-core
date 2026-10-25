@@ -355,7 +355,7 @@ def cmd_master(args):
 
 
 # ---------------------------------------------------------------------------
-# Orbit commands (protocol 0.4.0 — the canonical path)
+# Orbit commands (the canonical protocol, PROTOCOL_VERSION)
 # ---------------------------------------------------------------------------
 
 def _split_orbit_entropy(entropy_bits, thresholds):
@@ -376,7 +376,7 @@ def _split_orbit_entropy(entropy_bits, thresholds):
 
 
 def cmd_encode_orbit(args):
-    """Encode entropy onto the 0.4.0 orbit for a setup level (JSON out).
+    """Encode entropy onto the orbit for a setup level (JSON out).
 
     The orbit advance is memory-hard (Argon2d per stage boundary), so this is
     intentionally slow — one advance per stage transition at the chosen profile.
@@ -413,7 +413,7 @@ def cmd_encode_orbit(args):
 
     doc = {
         "version": get_engine_version(),
-        "protocol_version": PROTOCOL_VERSION,  # 0.4.0 orbit
+        "protocol_version": PROTOCOL_VERSION,  # the orbit
         "input": {
             "sigma_hex": args.sigma_hex,
             "setup_level": args.setup,
@@ -424,14 +424,14 @@ def cmd_encode_orbit(args):
             "argon2_iterations": args.iterations,
         },
         "stages": stage_docs,
-        "master_secret": {"k_hex": k.hex()},   # terminal K_N (cheap H)
+        "master_secret": {"k_hex": k.hex()},   # terminal K_N (tagged H)
     }
     json.dump(doc, sys.stdout, indent=2)
     print()
 
 
 def cmd_decode_orbit(args):
-    """Decode a 0.4.0 orbit document → recovered entropy + terminal K."""
+    """Decode an orbit document → recovered entropy + terminal K."""
     with open(args.input, "r") as f:
         doc = json.load(f)
     inp = doc["input"]
@@ -511,9 +511,9 @@ def main():
     mst.add_argument("--export-stage", type=int, default=None,
                      help="Point stage (1..N) to export at (default: last).")
 
-    # encode-orbit (protocol 0.4.0 — canonical)
+    # encode-orbit (the canonical protocol)
     enco = sub.add_parser("encode-orbit",
-                          help="Encode entropy onto the 0.4.0 orbit (JSON)")
+                          help="Encode entropy onto the orbit (JSON)")
     enco.add_argument("--sigma-hex", type=str, required=True,
                       help="Namtso salt sigma, hex (pre-harvested; e.g. from the "
                            "namtso CLI). The orbit root is o_0 = H(sigma).")
@@ -531,7 +531,7 @@ def main():
 
     # decode-orbit
     deco = sub.add_parser("decode-orbit",
-                          help="Decode a 0.4.0 orbit document JSON → entropy + K")
+                          help="Decode an orbit document JSON → entropy + K")
     deco.add_argument("--input", type=str, required=True,
                       help="Path to encode-orbit output JSON")
 

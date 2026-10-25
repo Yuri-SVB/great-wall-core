@@ -1,0 +1,136 @@
+{
+  "engine_version": "0.3.0",
+  "protocol_version": "0.5.0",
+  "sigma_hex": "cb8b64be15a4996892427fa3a8ec859b26df8b93745bb14bfeb8e48707b54aafa19854efa51a8d85780130ae7e2326e1c6065865d151788fef1625cc6cb6703b5839db672911049835933c102f85fbb05c7fa052866083917920128d20556e5be48ecd1a8e9916a1613e3b9d3da2c0eb076327167ea31727c693169151d4f4d0",
+  "setup_level": 2,
+  "substandard": false,
+  "thresholds": [
+    2,
+    3
+  ],
+  "argon2_profile": 0,
+  "iterations": 1,
+  "vec_params": {
+    "max_iter": 200,
+    "target_good": 30,
+    "max_flood_points": 10000,
+    "min_grid_cells": 1024,
+    "p_max_shift": 1,
+    "exclusion_threshold_num": 204,
+    "rng_seed": 66
+  },
+  "vec_area": [
+    -2.0,
+    1.0,
+    -1.5,
+    1.0
+  ],
+  "terminal_k_hex": "4f84ed1790b0c5b337a8d5f6b45d5be44eb87d3643d8173e07a43659fcf3f913dc314ae80fa873be4045ca3213fe9700a8be88199b6ce04b86d27fd66f7b750a",
+  "stages": [
+    {
+      "index": 0,
+      "threshold": 2,
+      "o_hex": "cb8d8e2112b4618dfefec93f1000ec5c01dbd130df166fbe491d8d49426be1960f328e5ad7f65223262bce32ee9ca708a320f48e1d55cde704df0e5ac61bd420",
+      "chunks_u32": [
+        "d3c4725c",
+        "0e3128eb"
+      ],
+      "fractals": [
+        {
+          "o": "e87abc3461a32303",
+          "p": "f4a3c7c95867a4d1",
+          "q": "9536f5a11c012c3d"
+        },
+        {
+          "o": "8428d958b2eeae4a",
+          "p": "333d1f628aaed7b2",
+          "q": "1c3b912a12cbf427"
+        }
+      ],
+      "points": [
+        {
+          "re_raw": "f1398d4745c9770a",
+          "im_raw": "f08d982b81dceb4e"
+        },
+        {
+          "re_raw": "f6cf0a7901618a86",
+          "im_raw": "f51d21c0e558d54b"
+        }
+      ],
+      "sh": [
+        "98974431",
+        "4b53366d"
+      ],
+      "u_hex": "72bdecbccb5d64884b256a8513c2e9867e31d3fd935302a16290e8d7dd96eea391a49eb64cc9629aab4516f2c797c178e6004909a7b1979a2ad329d8ce46b340",
+      "k_hex": "56c7b65febc9a5516256274004d432c0a12ff7a2d98b9e81e2496b52b3299206657d283241a599095496879cf56985db76b6404b77b2c1758aa1823b2a918304",
+      "exports": [
+        {
+          "label": "",
+          "key_hex": "06edc6d1f3209172e9a2b70339733b85567e8530585447f0c42bd47567e237135d40987c12dcf5c4ad7ea1388f4bc8d3c880803e3db672c0f846305f50d616d4"
+        },
+        {
+          "label": "EXAMPLE-1",
+          "key_hex": "898d92060c76fce703432b5f222e0a87d9e68954b62e533ca8f4700c12492168b0b5716b0a959bfa3038717905521b21642abcd29ca50a3242f72cc5233adf0e"
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "threshold": 3,
+      "o_hex": "aad4b5dd01490e0e483a21ec1ca8818948b152a3bbd7b2b615fa3da9060d4d0daab16d4ef848ec316c1e96962e06ea531b4009944ee44bcd7d4899164967a938",
+      "chunks_u32": [
+        "5684703c",
+        "4dd02a52",
+        "3fc4f833"
+      ],
+      "fractals": [
+        {
+          "o": "1cbbe26a70fc9af6",
+          "p": "68baa93d0b7aefce",
+          "q": "89fb5b4ae3057f2c"
+        },
+        {
+          "o": "4aaa735ed90b6a07",
+          "p": "75388f05016166fe",
+          "q": "b756cc3bacff953f"
+        },
+        {
+          "o": "8045ea83ee19e260",
+          "p": "d816e7c5a09c6052",
+          "q": "799ece13fc2e7f97"
+        }
+      ],
+      "points": [
+        {
+          "re_raw": "f6956f88cfdf6e8e",
+          "im_raw": "f2fdbf883d7f600a"
+        },
+        {
+          "re_raw": "fb7b296a4f8637e3",
+          "im_raw": "f164880253301a6d"
+        },
+        {
+          "re_raw": "e92f753180f2acd4",
+          "im_raw": "fc8c1f885ed88cd6"
+        }
+      ],
+      "sh": [
+        "2490a25d",
+        "cf875ffa",
+        "bd938d9b"
+      ],
+      "u_hex": "330819018cd5c6c3e77b4006b85255908977be1eb413cd34c69db860832cfc1fcac694da0a8bcbd036461027c2ec3049e70c36cf06941f41911c053b67d9794b",
+      "k_hex": "4f84ed1790b0c5b337a8d5f6b45d5be44eb87d3643d8173e07a43659fcf3f913dc314ae80fa873be4045ca3213fe9700a8be88199b6ce04b86d27fd66f7b750a",
+      "exports": [
+        {
+          "label": "",
+          "key_hex": "58b19b80b96e497e77788903cf9606066a1cea2c50485a70ad70a4e46fa27d980d57bbcda5bb0619e3e7b7e63a8892a894ad6f0fcfe1399c7443e63ce049a172"
+        },
+        {
+          "label": "EXAMPLE-1",
+          "key_hex": "d5850402f7573ad7d8ea2703434255679f3cf1a831cee8ee0d5069dc3ec065ae9bbe23fa1d42556c206d55b604fa702682ddf30baabf3adcec3c744b179c066f"
+        }
+      ]
+    }
+  ]
+}

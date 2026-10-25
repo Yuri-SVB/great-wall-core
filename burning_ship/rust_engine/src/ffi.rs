@@ -1433,11 +1433,21 @@ pub extern "C" fn bs_export_key(
     unsafe { slice::from_raw_parts_mut(out_digest, ORBIT_LEN).copy_from_slice(&digest) };
 }
 
+/// [`bs_orbit_advance`] status: the step ran and both outputs were written.
+pub const ORBIT_ADVANCE_OK: u8 = 1;
+/// [`bs_orbit_advance`] status: `steps` was 0 (the derivation-step count `D` must
+/// be ≥ 1); nothing was written.
+pub const ORBIT_ADVANCE_REJECTED: u8 = 0;
+
 /// One orbit step: writes `K_i` to `out_k` and `o_{i+1} = H*(u_i)` (Argon2d
 /// `profile`, `steps` passes) to `out_next`, both [`bs_orbit_point_len`] bytes.
 /// `K_i` and `u_i` are domain-separated, so the returned key does not advance the
 /// orbit. The raw `{o_i, Sh_i}` copies are zeroized before the memory-hard step
 /// (crate::orbit::orbit_step). `profile`: 0=Basic, 1=Advanced, 2=Great Wall.
+///
+/// Returns [`ORBIT_ADVANCE_OK`], or [`ORBIT_ADVANCE_REJECTED`] without writing
+/// anything when `steps == 0` — rejected here rather than by the assertion in
+/// [`crate::orbit::advance_with`], whose panic would abort the caller's process.
 #[no_mangle]
 pub extern "C" fn bs_orbit_advance(
     o_ptr: *const u8,
@@ -1447,8 +1457,11 @@ pub extern "C" fn bs_orbit_advance(
     profile: u8,
     out_k: *mut u8,
     out_next: *mut u8,
-) {
+) -> u8 {
     use zeroize::Zeroizing;
+    if steps == 0 {
+        return ORBIT_ADVANCE_REJECTED;
+    }
     let mut o = Zeroizing::new([0u8; ORBIT_LEN]);
     o.copy_from_slice(unsafe { slice::from_raw_parts(o_ptr, ORBIT_LEN) });
     let sh = Zeroizing::new(unsafe { slice::from_raw_parts(sh_ptr, sh_len as usize) }.to_vec());
@@ -1457,6 +1470,7 @@ pub extern "C" fn bs_orbit_advance(
         slice::from_raw_parts_mut(out_k, ORBIT_LEN).copy_from_slice(&k_i);
         slice::from_raw_parts_mut(out_next, ORBIT_LEN).copy_from_slice(&o_next);
     }
+    ORBIT_ADVANCE_OK
 }
 
 /// Interpolate the full Shamir polynomial `Sh` from `t` points over GF(2^32):
@@ -1625,5 +1639,22 @@ mod tests {
         bs_render_viewport_generic_u32(0.0, 0.0, 0.01, 0, 8, 32, 0, 0, 0, counts.as_mut_ptr());
         bs_render_viewport_generic_u32(0.0, 0.0, 0.01, 8, -1, 32, 0, 0, 0, counts.as_mut_ptr());
         assert_eq!(counts, vec![7u32; 4], "degenerate call must not write");
+    }
+
+    /// `steps == 0` is rejected with a status instead of panicking across the C
+    /// ABI (which aborts the caller), and leaves both outputs untouched.
+    #[test]
+    fn orbit_advance_rejects_zero_steps() {
+        const SENTINEL: u8 = 0xA5;
+        let o = [0u8; ORBIT_LEN];
+        let sh = [0u8; 4];
+        let mut k = [SENTINEL; ORBIT_LEN];
+        let mut next = [SENTINEL; ORBIT_LEN];
+        let status = bs_orbit_advance(
+            o.as_ptr(), sh.as_ptr(), sh.len() as u32, 0, 0, k.as_mut_ptr(), next.as_mut_ptr(),
+        );
+        assert_eq!(status, ORBIT_ADVANCE_REJECTED);
+        assert!(k.iter().all(|&b| b == SENTINEL), "rejected call must not write K_i");
+        assert!(next.iter().all(|&b| b == SENTINEL), "rejected call must not write o_next");
     }
 }
