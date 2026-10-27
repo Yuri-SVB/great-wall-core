@@ -354,7 +354,7 @@ fn pixel_delta_from_shift(area: &Rect, shift: u32) -> Fixed {
 /// Equivalently, p0 = 2^floor(log2(sqrt(width * height / min_grid_cells))).
 /// All arithmetic is integer (i128); no floating-point.
 #[allow(unused_variables, unused_assignments)]
-fn compute_p0(area: &Rect, min_grid_cells: u64) -> Fixed {
+pub(crate) fn compute_p0(area: &Rect, min_grid_cells: u64) -> Fixed {
     let w = area.width().0 as i128;
     let h = area.height().0 as i128;
     if w <= 0 || h <= 0 || min_grid_cells == 0 {
@@ -896,6 +896,18 @@ pub struct CanonicalIsland {
     pub bbox: Rect,
     /// Every flood-fill point of the island.
     pub points: Vec<(Fixed, Fixed)>,
+    /// Mean of the points, rounded down.
+    pub barycentre: (Fixed, Fixed),
+}
+
+/// Mean of `points`, rounded down (`(0, 0)` for none).
+fn barycentre(points: &[(Fixed, Fixed)]) -> (Fixed, Fixed) {
+    let n = points.len().max(1) as i128;
+    let mean = |sum: i128| Fixed(sum.div_euclid(n) as i64);
+    let (re, im) = points
+        .iter()
+        .fold((0i128, 0i128), |(a, b), p| (a + p.0 .0 as i128, b + p.1 .0 as i128));
+    (mean(re), mean(im))
 }
 
 /// Select the canonical island of `area` (typically a decoded leaf rectangle).
@@ -938,6 +950,7 @@ pub fn canonical_island(
         pixel_delta: islands[i].pixel_delta,
         bbox: islands[i].bbox,
         points: island_points[i].clone(),
+        barycentre: barycentre(&island_points[i]),
     })
 }
 
@@ -963,6 +976,11 @@ mod tests {
         assert!(!a.points.is_empty());
         // Every flood point is a cell of the island.
         assert_eq!(a.points.len() as u64, a.pixel_count);
+        // Its barycentre is the mean of its points, rounded down.
+        let n = a.points.len() as i128;
+        let sum_re: i128 = a.points.iter().map(|p| p.0 .0 as i128).sum();
+        let sum_im: i128 = a.points.iter().map(|p| p.1 .0 as i128).sum();
+        assert_eq!(a.barycentre, (Fixed(sum_re.div_euclid(n) as i64), Fixed(sum_im.div_euclid(n) as i64)));
 
         // It is the largest island the same discovery finds.
         let (islands, _) = discover_islands(&area, &params, seed, 0, 0, 0, "O", &[]);
