@@ -62,6 +62,17 @@ done
 
 echo ""
 echo "============================================"
+echo "  Landmark path: frozen vectors"
+echo "============================================"
+if python3 test_landmark_vectors.py; then
+    echo "  => Landmark vector tests OK"
+else
+    echo "  => Landmark vector tests FAILED"
+    FAIL=1
+fi
+
+echo ""
+echo "============================================"
 if [ $FAIL -eq 0 ]; then
     echo "  ALL TESTS PASSED"
 else
