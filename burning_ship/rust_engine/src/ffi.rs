@@ -1338,6 +1338,301 @@ pub extern "C" fn bs_canonical_island_free(handle: *mut CanonicalIslandHandle) {
     }
 }
 
+/// Write the island's barycentre, the mean of its flood points rounded down
+/// (Fixed). Either out pointer may be null; both are left untouched if no
+/// island was found.
+#[no_mangle]
+pub extern "C" fn bs_canonical_island_barycentre(
+    handle: *const CanonicalIslandHandle,
+    out_re: *mut Fixed,
+    out_im: *mut Fixed,
+) {
+    let h = unsafe { &*handle };
+    if let Some(island) = &h.island {
+        put(out_re, island.barycentre.0);
+        put(out_im, island.barycentre.1);
+    }
+}
+
+/// The canonical island's flood cap (`protocol::CANONICAL_MAX_FLOOD_POINTS`):
+/// pass it as `max_flood_points` to [`bs_canonical_island_compute`], with the
+/// other values from [`bs_encode_params`].
+#[no_mangle]
+pub extern "C" fn bs_canonical_max_flood_points() -> u64 {
+    crate::protocol::CANONICAL_MAX_FLOOD_POINTS
+}
+
+/// Write `v` through `out` unless it is null.
+fn put<T>(out: *mut T, v: T) {
+    if !out.is_null() {
+        unsafe { *out = v };
+    }
+}
+
+// -----------------------------------------------------------------------
+// Landmark path (per-leaf default path, for display)
+// -----------------------------------------------------------------------
+//
+// Computes the default landmark path of a leaf: its stops from the root
+// area's outer shell to the leaf feature. Handle-based because the stops and
+// their cells are variable-length: compute once, then read each stop.
+
+use crate::landmark::{
+    landmark_path, LandmarkParams, LandmarkPath, PathError, Ratio, LANDMARK_PATH_VERSION,
+};
+
+/// [`bs_landmark_path_status`]: the path was computed.
+pub const LANDMARK_PATH_OK: i32 = 0;
+/// [`bs_landmark_path_status`]: the parameters are invalid.
+pub const LANDMARK_PATH_INVALID_PARAMS: i32 = 1;
+/// [`bs_landmark_path_status`]: the leaf has no canonical island.
+pub const LANDMARK_PATH_NO_ISLAND: i32 = 2;
+/// [`bs_landmark_path_status`]: the root area has no outer shell.
+pub const LANDMARK_PATH_NO_COAST: i32 = 3;
+
+/// Opaque handle holding a landmark-path result.
+pub struct LandmarkPathHandle {
+    result: Result<LandmarkPath, PathError>,
+}
+
+/// Return the landmark-path output version string, as [`bs_engine_version`]
+/// does. A path saved or cached under one version is recomputed under another.
+#[no_mangle]
+pub extern "C" fn bs_landmark_path_version(out_buf: *mut u8, buf_len: u32) -> u32 {
+    let v = LANDMARK_PATH_VERSION.as_bytes();
+    let copy_len = v.len().min(buf_len.saturating_sub(1) as usize);
+    if !out_buf.is_null() && buf_len > 0 {
+        let buf = unsafe { slice::from_raw_parts_mut(out_buf, buf_len as usize) };
+        buf[..copy_len].copy_from_slice(&v[..copy_len]);
+        buf[copy_len] = 0;
+    }
+    v.len() as u32
+}
+
+/// Fill the default landmark-path parameters — the values callers pass back
+/// into [`bs_landmark_path_compute`] rather than declaring their own. Any out
+/// pointer may be null to skip it.
+#[no_mangle]
+pub extern "C" fn bs_landmark_params(
+    out_flood_cells: *mut u64,
+    out_scan_max_iter: *mut u32,
+    out_min_escape: *mut u32,
+    out_seed_grid: *mut u32,
+    out_shells: *mut u32,
+    out_reach: *mut u32,
+    out_ladder_ratio_num: *mut u32,
+    out_ladder_ratio_den: *mut u32,
+    out_leaf_share_num: *mut u32,
+    out_leaf_share_den: *mut u32,
+    out_keep: *mut u32,
+    out_min_cells: *mut u32,
+    out_rho_num: *mut u32,
+    out_rho_den: *mut u32,
+    out_badness_exponent: *mut u32,
+    out_badness_charge_num: *mut u32,
+    out_badness_charge_den: *mut u32,
+    out_metric_frac_bits: *mut u32,
+    out_canonical_max_flood_points: *mut u64,
+) {
+    let p = LandmarkParams::default();
+    put(out_flood_cells, p.flood_cells);
+    put(out_scan_max_iter, p.scan_max_iter);
+    put(out_min_escape, p.min_escape);
+    put(out_seed_grid, p.seed_grid);
+    put(out_shells, p.shells);
+    put(out_reach, p.reach);
+    put(out_ladder_ratio_num, p.ladder_ratio.num);
+    put(out_ladder_ratio_den, p.ladder_ratio.den);
+    put(out_leaf_share_num, p.leaf_share.num);
+    put(out_leaf_share_den, p.leaf_share.den);
+    put(out_keep, p.keep);
+    put(out_min_cells, p.min_cells);
+    put(out_rho_num, p.rho.num);
+    put(out_rho_den, p.rho.den);
+    put(out_badness_exponent, p.badness_exponent);
+    put(out_badness_charge_num, p.badness_charge.num);
+    put(out_badness_charge_den, p.badness_charge.den);
+    put(out_metric_frac_bits, p.metric_frac_bits);
+    put(out_canonical_max_flood_points, p.canonical_max_flood_points);
+}
+
+/// Compute the default landmark path of a leaf: its rectangle and bisection
+/// path (from `bs_decode_full` / `bs_leaf_areas_path`) on the fractal
+/// `(o, p, q)`, with the parameters of [`bs_landmark_params`]. Slow (seconds):
+/// call it off the UI thread. Returns an opaque handle; query it with the
+/// other `bs_landmark_path_*` functions and free it with
+/// [`bs_landmark_path_free`].
+#[no_mangle]
+pub extern "C" fn bs_landmark_path_compute(
+    o: u64,
+    p: u64,
+    q: u64,
+    leaf_re_min: Fixed,
+    leaf_re_max: Fixed,
+    leaf_im_min: Fixed,
+    leaf_im_max: Fixed,
+    path: *const u8,
+    path_len: u32,
+    flood_cells: u64,
+    scan_max_iter: u32,
+    min_escape: u32,
+    seed_grid: u32,
+    shells: u32,
+    reach: u32,
+    ladder_ratio_num: u32,
+    ladder_ratio_den: u32,
+    leaf_share_num: u32,
+    leaf_share_den: u32,
+    keep: u32,
+    min_cells: u32,
+    rho_num: u32,
+    rho_den: u32,
+    badness_exponent: u32,
+    badness_charge_num: u32,
+    badness_charge_den: u32,
+    metric_frac_bits: u32,
+    canonical_max_flood_points: u64,
+) -> *mut LandmarkPathHandle {
+    let path_str = if path.is_null() || path_len == 0 {
+        "O"
+    } else {
+        unsafe { std::str::from_utf8_unchecked(slice::from_raw_parts(path, path_len as usize)) }
+    };
+    let leaf = Rect { re_min: leaf_re_min, re_max: leaf_re_max, im_min: leaf_im_min, im_max: leaf_im_max };
+    let params = LandmarkParams {
+        flood_cells,
+        scan_max_iter,
+        min_escape,
+        seed_grid,
+        shells,
+        reach,
+        ladder_ratio: Ratio::new(ladder_ratio_num, ladder_ratio_den),
+        leaf_share: Ratio::new(leaf_share_num, leaf_share_den),
+        keep,
+        min_cells,
+        rho: Ratio::new(rho_num, rho_den),
+        badness_exponent,
+        badness_charge: Ratio::new(badness_charge_num, badness_charge_den),
+        metric_frac_bits,
+        canonical_max_flood_points,
+    };
+    let result = landmark_path(o, p, q, &leaf, path_str, &params);
+    Box::into_raw(Box::new(LandmarkPathHandle { result }))
+}
+
+/// One of the `LANDMARK_PATH_*` status constants.
+#[no_mangle]
+pub extern "C" fn bs_landmark_path_status(handle: *const LandmarkPathHandle) -> i32 {
+    let h = unsafe { &*handle };
+    match h.result {
+        Ok(_) => LANDMARK_PATH_OK,
+        Err(PathError::InvalidParams) => LANDMARK_PATH_INVALID_PARAMS,
+        Err(PathError::NoIsland) => LANDMARK_PATH_NO_ISLAND,
+        Err(PathError::NoCoast) => LANDMARK_PATH_NO_COAST,
+    }
+}
+
+/// Number of stops (0 unless the status is [`LANDMARK_PATH_OK`]).
+#[no_mangle]
+pub extern "C" fn bs_landmark_path_num_stops(handle: *const LandmarkPathHandle) -> u32 {
+    let h = unsafe { &*handle };
+    h.result.as_ref().map_or(0, |p| p.stops.len() as u32)
+}
+
+/// Write stop `idx`: its kind (0 outer shell, 1 fiord, 2 feature, 3 leaf),
+/// ladder index, bottom count, seed `[re, im]`, barycentre `[re, im]`,
+/// bounding box of its cell centres `[re_min, re_max, im_min, im_max]`, cell
+/// count and cell size (Fixed), and its cell bitmap's origin (the centre of
+/// bitmap cell (0, 0), `[re, im]`), width and height. Any out pointer may be
+/// null. Returns 1, or 0 (writing nothing) if `idx` is out of range.
+#[no_mangle]
+pub extern "C" fn bs_landmark_path_stop(
+    handle: *const LandmarkPathHandle,
+    idx: u32,
+    out_kind: *mut u32,
+    out_ladder_index: *mut u32,
+    out_bottom: *mut u32,
+    out_seed: *mut Fixed,
+    out_barycentre: *mut Fixed,
+    out_bbox: *mut Fixed,
+    out_cell_count: *mut u64,
+    out_cell: *mut Fixed,
+    out_cells_origin: *mut Fixed,
+    out_cells_w: *mut u32,
+    out_cells_h: *mut u32,
+) -> i32 {
+    let h = unsafe { &*handle };
+    let Some(f) = h.result.as_ref().ok().and_then(|p| p.stops.get(idx as usize)) else {
+        return 0;
+    };
+    put(out_kind, f.kind as u32);
+    put(out_ladder_index, f.ladder_index);
+    put(out_bottom, f.bottom);
+    let pair = |out: *mut Fixed, v: (Fixed, Fixed)| {
+        if !out.is_null() {
+            let o = unsafe { slice::from_raw_parts_mut(out, 2) };
+            (o[0], o[1]) = v;
+        }
+    };
+    pair(out_seed, f.seed);
+    pair(out_barycentre, f.barycentre);
+    if !out_bbox.is_null() {
+        let b = unsafe { slice::from_raw_parts_mut(out_bbox, 4) };
+        (b[0], b[1], b[2], b[3]) = (f.bbox.re_min, f.bbox.re_max, f.bbox.im_min, f.bbox.im_max);
+    }
+    put(out_cell_count, f.cell_count);
+    put(out_cell, f.cell);
+    pair(out_cells_origin, (Fixed(f.cells.re0), Fixed(f.cells.im0)));
+    put(out_cells_w, f.cells.w as u32);
+    put(out_cells_h, f.cells.h as u32);
+    1
+}
+
+/// Copy stop `idx`'s cell bitmap into `out` as `w × h` bytes, row-major from
+/// the lowest imaginary part, 1 for a cell of the stop and 0 otherwise.
+/// Writes at most `cap` bytes; returns `w × h` (0 if `idx` is out of range).
+#[no_mangle]
+pub extern "C" fn bs_landmark_path_stop_cells(
+    handle: *const LandmarkPathHandle,
+    idx: u32,
+    out: *mut u8,
+    cap: u32,
+) -> u32 {
+    let h = unsafe { &*handle };
+    let Some(f) = h.result.as_ref().ok().and_then(|p| p.stops.get(idx as usize)) else {
+        return 0;
+    };
+    let (w, hgt) = (f.cells.w, f.cells.h);
+    if !out.is_null() && cap > 0 {
+        let n = (w * hgt).min(cap as usize);
+        let buf = unsafe { slice::from_raw_parts_mut(out, n) };
+        for (k, b) in buf.iter_mut().enumerate() {
+            *b = f.cells.get(k % w, k / w) as u8;
+        }
+    }
+    (w * hgt) as u32
+}
+
+/// The zoom distance of hop `idx` (from stop `idx` to stop `idx + 1`) in units
+/// of `2^-metric_frac_bits`, saturating at `u64::MAX`; 0 if out of range.
+#[no_mangle]
+pub extern "C" fn bs_landmark_path_hop(handle: *const LandmarkPathHandle, idx: u32) -> u64 {
+    let h = unsafe { &*handle };
+    h.result
+        .as_ref()
+        .ok()
+        .and_then(|p| p.hops.get(idx as usize))
+        .map_or(0, |&d| d.min(u64::MAX as u128) as u64)
+}
+
+/// Free a landmark-path handle.
+#[no_mangle]
+pub extern "C" fn bs_landmark_path_free(handle: *mut LandmarkPathHandle) {
+    if !handle.is_null() {
+        unsafe { drop(Box::from_raw(handle)) };
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Orbit protocol (0.5.0) — engine-authoritative primitives.
 

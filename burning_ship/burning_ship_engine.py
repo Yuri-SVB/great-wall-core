@@ -310,6 +310,53 @@ _lib.bs_setup_tier_thresholds.restype = ctypes.c_uint32
 _lib.bs_setup_tier_substandard.argtypes = [ctypes.c_uint32]  # level
 _lib.bs_setup_tier_substandard.restype = ctypes.c_uint8
 
+# Landmark path (src/landmark): default params, compute, per-stop accessors.
+_U32P = ctypes.POINTER(ctypes.c_uint32)
+_U64P = ctypes.POINTER(ctypes.c_uint64)
+_I64P = ctypes.POINTER(ctypes.c_int64)
+# Field order of bs_landmark_params / bs_landmark_path_compute, with C types.
+LANDMARK_PARAM_FIELDS = (
+    ("flood_cells", ctypes.c_uint64), ("scan_max_iter", ctypes.c_uint32),
+    ("min_escape", ctypes.c_uint32), ("seed_grid", ctypes.c_uint32),
+    ("shells", ctypes.c_uint32), ("reach", ctypes.c_uint32),
+    ("ladder_ratio_num", ctypes.c_uint32), ("ladder_ratio_den", ctypes.c_uint32),
+    ("leaf_share_num", ctypes.c_uint32), ("leaf_share_den", ctypes.c_uint32),
+    ("keep", ctypes.c_uint32), ("min_cells", ctypes.c_uint32),
+    ("rho_num", ctypes.c_uint32), ("rho_den", ctypes.c_uint32),
+    ("badness_exponent", ctypes.c_uint32),
+    ("badness_charge_num", ctypes.c_uint32), ("badness_charge_den", ctypes.c_uint32),
+    ("metric_frac_bits", ctypes.c_uint32),
+    ("canonical_max_flood_points", ctypes.c_uint64),
+)
+_lib.bs_landmark_params.argtypes = [ctypes.POINTER(t) for _n, t in LANDMARK_PARAM_FIELDS]
+_lib.bs_landmark_params.restype = None
+_lib.bs_landmark_path_version.argtypes = [ctypes.POINTER(ctypes.c_uint8), ctypes.c_uint32]
+_lib.bs_landmark_path_version.restype = ctypes.c_uint32
+_lib.bs_landmark_path_compute.argtypes = (
+    [ctypes.c_uint64] * 3 + [ctypes.c_int64] * 4
+    + [ctypes.POINTER(ctypes.c_uint8), ctypes.c_uint32]
+    + [t for _n, t in LANDMARK_PARAM_FIELDS])
+_lib.bs_landmark_path_compute.restype = ctypes.c_void_p
+_lib.bs_landmark_path_status.argtypes = [ctypes.c_void_p]
+_lib.bs_landmark_path_status.restype = ctypes.c_int32
+_lib.bs_landmark_path_num_stops.argtypes = [ctypes.c_void_p]
+_lib.bs_landmark_path_num_stops.restype = ctypes.c_uint32
+_lib.bs_landmark_path_stop.argtypes = [
+    ctypes.c_void_p, ctypes.c_uint32,
+    _U32P, _U32P, _U32P,        # kind, ladder index, bottom
+    _I64P, _I64P, _I64P,        # seed[2], barycentre[2], bbox[4]
+    _U64P, _I64P,               # cell count, cell size
+    _I64P, _U32P, _U32P,        # bitmap origin[2], width, height
+]
+_lib.bs_landmark_path_stop.restype = ctypes.c_int32
+_lib.bs_landmark_path_stop_cells.argtypes = [
+    ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint8), ctypes.c_uint32]
+_lib.bs_landmark_path_stop_cells.restype = ctypes.c_uint32
+_lib.bs_landmark_path_hop.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+_lib.bs_landmark_path_hop.restype = ctypes.c_uint64
+_lib.bs_landmark_path_free.argtypes = [ctypes.c_void_p]
+_lib.bs_landmark_path_free.restype = None
+
 
 
 # ---------------------------------------------------------------------------
@@ -977,3 +1024,64 @@ def setup_tier_substandard(level):
     """True iff `level` is the substandard entry tier (Setup 1, 64-bit deep
     stage). UIs MUST surface this loudly wherever Setup 1 is offered."""
     return bool(_lib.bs_setup_tier_substandard(level))
+
+
+# Landmark path --------------------------------------------------------------
+
+LANDMARK_KINDS = ("outer_shell", "fiord", "feature", "leaf")
+
+
+def landmark_path_version():
+    """The landmark-path output version string."""
+    n = _lib.bs_landmark_path_version(None, 0)
+    buf = (ctypes.c_uint8 * (n + 1))()
+    _lib.bs_landmark_path_version(buf, n + 1)
+    return bytes(buf[:n]).decode("ascii")
+
+
+def landmark_params():
+    """The engine's default landmark-path parameters, as a dict keyed by
+    ``LANDMARK_PARAM_FIELDS`` names."""
+    vals = [t() for _n, t in LANDMARK_PARAM_FIELDS]
+    _lib.bs_landmark_params(*[ctypes.byref(v) for v in vals])
+    return {n: v.value for (n, _t), v in zip(LANDMARK_PARAM_FIELDS, vals)}
+
+
+def landmark_path(leaf_rect, path, params=None, o=0, p=0, q=0):
+    """The default landmark path of a leaf (its Rect and bisection path) on
+    the fractal (o, p, q). Returns (status, stops, hops): each stop a dict of
+    its identity, measures (raw Fixed) and cell bitmap (bytes, row-major from
+    the lowest im, one per cell); hops in units of 2^-metric_frac_bits."""
+    params = landmark_params() if params is None else params
+    pp_arr, pp_len = _path_prefix_args(path)
+    m = 0xFFFFFFFFFFFFFFFF
+    h = _lib.bs_landmark_path_compute(
+        o & m, p & m, q & m,
+        leaf_rect.re_min, leaf_rect.re_max, leaf_rect.im_min, leaf_rect.im_max,
+        pp_arr, pp_len, *[params[n] for n, _t in LANDMARK_PARAM_FIELDS])
+    try:
+        status = _lib.bs_landmark_path_status(h)
+        stops = []
+        for k in range(_lib.bs_landmark_path_num_stops(h)):
+            kind, ladder, bottom = (ctypes.c_uint32() for _ in range(3))
+            seed, bary = (ctypes.c_int64 * 2)(), (ctypes.c_int64 * 2)()
+            bbox, origin = (ctypes.c_int64 * 4)(), (ctypes.c_int64 * 2)()
+            count, cell = ctypes.c_uint64(), ctypes.c_int64()
+            w, hh = ctypes.c_uint32(), ctypes.c_uint32()
+            _lib.bs_landmark_path_stop(
+                h, k, ctypes.byref(kind), ctypes.byref(ladder), ctypes.byref(bottom),
+                seed, bary, bbox, ctypes.byref(count), ctypes.byref(cell),
+                origin, ctypes.byref(w), ctypes.byref(hh))
+            n = _lib.bs_landmark_path_stop_cells(h, k, None, 0)
+            cells = (ctypes.c_uint8 * n)()
+            _lib.bs_landmark_path_stop_cells(h, k, cells, n)
+            stops.append(dict(
+                kind=LANDMARK_KINDS[kind.value], ladder_index=ladder.value,
+                bottom=bottom.value, seed=list(seed), barycentre=list(bary),
+                bbox=list(bbox), cell_count=count.value, cell=cell.value,
+                cells_origin=list(origin), cells_w=w.value, cells_h=hh.value,
+                cells=bytes(cells)))
+        hops = [_lib.bs_landmark_path_hop(h, k) for k in range(max(len(stops) - 1, 0))]
+        return status, stops, hops
+    finally:
+        _lib.bs_landmark_path_free(h)

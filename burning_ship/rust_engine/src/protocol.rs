@@ -60,6 +60,18 @@ pub fn encode_params() -> DiscoveryParams {
     }
 }
 
+/// Flood cap of a leaf's canonical island: the encoder's discovery
+/// parameters with this cap give the island a real shape rather than a
+/// speck. Used for display and as the landmark path's end.
+pub const CANONICAL_MAX_FLOOD_POINTS: u64 = 50_000;
+
+/// The discovery parameters of a leaf's canonical island: the encode
+/// parameters with a flood cap of `max_flood_points`
+/// ([`CANONICAL_MAX_FLOOD_POINTS`] by default).
+pub fn canonical_params(max_flood_points: u64) -> DiscoveryParams {
+    DiscoveryParams { max_flood_points, ..encode_params() }
+}
+
 /// The encoding area — the Burning Ship region whose island density supports
 /// 32-bit encoding (`constants.py` `ENCODE_AREA`).
 pub fn encode_area() -> Rect {
